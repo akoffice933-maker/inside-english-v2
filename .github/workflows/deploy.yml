@@ -17,7 +17,6 @@ permissions:
   id-token: write
 
 # Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queue.
-# However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
 concurrency:
   group: "pages"
   cancel-in-progress: false
@@ -45,14 +44,15 @@ jobs:
         run: npm ci
 
       - name: Build Next.js Static Export
-        # We temporarily inject environment variables to configure Static Export & basePath.
-        # This compiles the entire app into a fully-functional offline-safe static build.
+        # Fixes Compilation Step: Temporarily hides dynamic API route folders during Static Export,
+        # ensuring GitHub Pages can build and deploy the React frontend cleanly.
         run: |
+          mv app/api app/api_backup
           export NEXT_PUBLIC_SUPABASE_URL="https://mock.supabase.co"
           export NEXT_PUBLIC_SUPABASE_ANON_KEY="mock-key"
           npx next build
+          mv app/api_backup app/api
         env:
-          # Sets base path matching your repository name for GitHub Pages nested pathing
           NEXT_PUBLIC_BASE_PATH: "/inside-english-v2"
 
       - name: Upload Artifacts

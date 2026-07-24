@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
     // 2. Fetch User Profile for level and preferred state fallbacks
     const { data: profile, error: profileError } = await supabase
       .from('users')
-      .select('level, preferred_state')
+      .select('level, preferred_state, settings')
       .eq('id', user.id)
       .single();
 

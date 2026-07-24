@@ -2,11 +2,6 @@ import { PushNotifications } from '@capacitor/push-notifications';
 import { Capacitor } from '@capacitor/core';
 import { createClient } from '@supabase/supabase-js';
 
-// Setup browser-safe client initialization
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
 /**
  * Push Notifications Registration and Action Handler for Inside English v2.0
  */
@@ -32,6 +27,18 @@ export async function initializePushNotifications() {
 
     // 3. Register the device with Apple APNS or Google FCM
     await PushNotifications.register();
+
+    // Fix Vulnerability: Lazy load Supabase client only when executing on client-side native device,
+    // preventing compilation crashes during static export pre-rendering due to empty env keys.
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('[Push Notifications] Missing Supabase credentials. Cannot register device tokens.');
+      return;
+    }
+    
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
     // 4. Token generation listener: saves token to Supabase database
     await PushNotifications.addListener('registration', async (token) => {
@@ -70,20 +77,16 @@ export async function initializePushNotifications() {
     });
 
     // 5. Active Foreground Notification Event Listener
-    // Triggered when a notification arrives while the app is active and open
     await PushNotifications.addListener('pushNotificationReceived', (notification) => {
       console.log('[Push Notifications] Notification received in foreground:', notification);
-      // Here we can trigger custom in-app alerts, audio chimes, or banners using Zustand.
     });
 
     // 6. Notification Click Action Listener
-    // Triggered when a user taps a notification banner from their lock screen
     await PushNotifications.addListener('pushNotificationActionPerformed', (notificationAction) => {
       const data = notificationAction.notification.data;
       console.log('[Push Notifications] Notification clicked. Target Action:', data);
 
       if (data && data.trackId) {
-        // Example: Redirect user to the recommended track from the push payload!
         window.location.href = `/tracks/${data.trackId}`;
       }
     });

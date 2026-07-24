@@ -84,8 +84,11 @@ export async function POST(request: NextRequest) {
     // 4. Sync with Supabase Auth & PostgreSQL
     const supabase = createSupabaseRouteClient();
 
+    let session: any = null;
+    let userId: string | undefined = undefined;
+
     // Try signing in the Telegram user
-    let { data: authData, error: signInError } = await supabase.auth.signInWithPassword({
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
       email: mockEmail,
       password: tempPassword,
     });
@@ -110,9 +113,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: `Registration failed: ${signUpError.message}` }, { status: 500 });
       }
 
-      authData = signUpData;
+      session = signUpData.session;
+      userId = signUpData.user?.id;
     } else if (signInError) {
       return NextResponse.json({ error: `Authentication error: ${signInError.message}` }, { status: 500 });
+    } else {
+      session = signInData.session;
+      userId = signInData.user?.id;
     }
 
     // 5. Return Session Tokens to client with remaining rate limit headers
@@ -124,9 +131,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      session: authData.session,
+      session,
       user: {
-        id: authData.user?.id,
+        id: userId,
         name: `${firstName} ${lastName}`.trim(),
         username,
         email: mockEmail

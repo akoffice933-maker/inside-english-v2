@@ -19,7 +19,7 @@ const rateLimitStore = new Map<string, RateLimitRecord>();
 if (typeof window === 'undefined') {
   setInterval(() => {
     const now = Date.now();
-    for (const [key, record] of rateLimitStore.entries()) {
+    rateLimitStore.forEach((record, key) => {
       // Filter out timestamps older than 1 hour
       const activeTimestamps = record.timestamps.filter(time => now - time < 3600000);
       if (activeTimestamps.length === 0) {
@@ -27,7 +27,7 @@ if (typeof window === 'undefined') {
       } else {
         rateLimitStore.set(key, { timestamps: activeTimestamps });
       }
-    }
+    });
   }, 300000); // Clean up memory every 5 minutes
 }
 
