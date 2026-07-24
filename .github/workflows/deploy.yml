@@ -44,14 +44,14 @@ jobs:
         run: npm ci
 
       - name: Build Next.js Static Export
-        # Fixes Compilation Step: Temporarily hides dynamic API route folders during Static Export,
-        # ensuring GitHub Pages can build and deploy the React frontend cleanly.
+        # Fixes Compilation Step: Moves dynamic API routes OUTSIDE of the /app directory entirely (into root ./api_backup)
+        # during Static Export build, so that Next.js doesn't treat them as pages to pre-render.
         run: |
-          mv app/api app/api_backup
+          mv app/api ./api_backup
           export NEXT_PUBLIC_SUPABASE_URL="https://mock.supabase.co"
           export NEXT_PUBLIC_SUPABASE_ANON_KEY="mock-key"
           npx next build
-          mv app/api_backup app/api
+          mv ./api_backup app/api
         env:
           NEXT_PUBLIC_BASE_PATH: "/inside-english-v2"
 
