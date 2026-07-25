@@ -5,9 +5,10 @@ import { usePlayerStore, Track } from '@/stores/usePlayerStore';
 import { registerServiceWorker } from '@/lib/pwa-register';
 import { initializePushNotifications } from '@/lib/notifications';
 import { TelegramSDK } from '@/lib/telegram';
+import InteractiveStudyDemo from '@/components/InteractiveStudyDemo';
 
 export default function HomePage() {
-  const { setTrack, activeTrack } = usePlayerStore();
+  const { setTrack } = usePlayerStore();
   const [activeState, setActiveState] = useState<'relax' | 'energy' | 'sleep'>('relax');
   const [recommendations, setRecommendations] = useState<Track[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -52,10 +53,14 @@ export default function HomePage() {
             level: 'A1',
             state: activeState,
             audio_url: 'https://exdtomovofidksatbeje.supabase.co/storage/v1/object/public/audio/morning_sun.mp3',
-            duration: 270,
+            duration: 27,
             cover_gradient: activeState === 'sleep' ? 'linear-gradient(135deg, #2B1B4D 0%, #1A1A2E 100%)' : 'linear-gradient(135deg, #6C3CE1 0%, #E94057 100%)',
             is_premium: false,
-            tokens: []
+            tokens: [
+              { id: 1, start: 0.0, end: 3.5, russian: "Сегодня я проснулся рано.", english: "Today I woke up early.", mixed: "Сегодня я проснулся <span class='text-[#7B61FF] font-medium'>early</span>." },
+              { id: 2, start: 3.5, end: 7.2, russian: "Солнце светит ярко.", english: "The sun is shining brightly.", mixed: "Солнце <span class='text-[#7B61FF] font-medium'>is shining</span> ярко." },
+              { id: 3, start: 7.2, end: 11.0, russian: "Я чувствую спокойствие и счастье.", english: "I feel calm and happy.", mixed: "Я чувствую <span class='text-[#7B61FF] font-medium'>calm</span> и <span class='text-[#7B61FF] font-medium'>happy</span>." }
+            ]
           },
           {
             id: 'e4b2d56a-12e0-40e1-bb90-0f2c006509a2',
@@ -209,6 +214,11 @@ export default function HomePage() {
           </div>
         )}
       </div>
+
+      {/* ==========================================
+          5. INTERACTIVE STUDY DEMO BLOCK (Framer Motion Showcase)
+          ========================================== */}
+      <InteractiveStudyDemo />
 
       {/* Persistent Bottom Tab Bar Overlay (CSS Safe) */}
       <div className="fixed bottom-0 left-0 right-0 w-full max-w-md mx-auto bg-[#0D0D14]/90 backdrop-blur-md border-t border-white/5 py-4 px-6 flex justify-around items-center z-40 rounded-t-3xl">
