@@ -6,6 +6,9 @@
 
 import type { Track, TrackToken } from "@/lib/types";
 
+// Prepends basePath dynamically to support static GitHub Pages deployments correctly (Fixes Range/audio loading)
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || '';
+
 export type StudyWord = {
   id: number;
   english: string;
@@ -66,7 +69,7 @@ export const DEMO_TRACKS: Track[] = [
     category: "calm",
     coverGradient: "from-[#6C3CE1] to-[#7B61FF]",
     durationSec: 33,
-    audioUrl: "https://cdn.pixabay.com/audio/2022/03/15/audio_115b9c40b7.mp3",
+    audioUrl: `${BASE_PATH}/audio/morning_calm.mp3`,
     tokens: TRACK_CALM_TOKENS,
     isPremium: false,
     createdAt: new Date().toISOString(),
@@ -80,7 +83,7 @@ export const DEMO_TRACKS: Track[] = [
     category: "focus",
     coverGradient: "from-[#5B5BFF] to-[#7B61FF]",
     durationSec: 19,
-    audioUrl: "https://cdn.pixabay.com/audio/2022/03/10/audio_270f49b83a.mp3",
+    audioUrl: `${BASE_PATH}/audio/deep_focus.mp3`,
     tokens: TRACK_FOCUS_TOKENS,
     isPremium: false,
     createdAt: new Date().toISOString(),
@@ -94,7 +97,7 @@ export const DEMO_TRACKS: Track[] = [
     category: "energy",
     coverGradient: "from-[#E94057] to-[#FF7A5B]",
     durationSec: 11,
-    audioUrl: "https://cdn.pixabay.com/audio/2022/03/22/audio_a83b6a2d4f.mp3",
+    audioUrl: `${BASE_PATH}/audio/energy_boost.mp3`,
     tokens: TRACK_ENERGY_TOKENS,
     isPremium: true,
     createdAt: new Date().toISOString(),
@@ -108,7 +111,7 @@ export const DEMO_TRACKS: Track[] = [
     category: "sleep",
     coverGradient: "from-[#3A1F7A] to-[#6C3CE1]",
     durationSec: 18,
-    audioUrl: "https://cdn.pixabay.com/audio/2022/05/27/audio_18557fd6b1.mp3",
+    audioUrl: `${BASE_PATH}/audio/sleep_stories.mp3`,
     tokens: TRACK_SLEEP_TOKENS,
     isPremium: true,
     createdAt: new Date().toISOString(),
@@ -122,7 +125,7 @@ export const DEMO_TRACKS: Track[] = [
     category: "calm",
     coverGradient: "from-[#6C3CE1] to-[#E94057]",
     durationSec: 25,
-    audioUrl: "https://cdn.pixabay.com/audio/2022/03/15/audio_115b9c40b7.mp3",
+    audioUrl: `${BASE_PATH}/audio/morning_calm.mp3`,
     tokens: TRACK_CALM_TOKENS,
     isPremium: false,
     createdAt: new Date().toISOString(),
@@ -136,13 +139,14 @@ export const DEMO_TRACKS: Track[] = [
     category: "focus",
     coverGradient: "from-[#5B5BFF] to-[#E94057]",
     durationSec: 19,
-    audioUrl: "https://cdn.pixabay.com/audio/2022/03/10/audio_270f49b83a.mp3",
+    audioUrl: `${BASE_PATH}/audio/deep_focus.mp3`,
     tokens: TRACK_FOCUS_TOKENS,
     isPremium: false,
     createdAt: new Date().toISOString(),
   },
 ];
 
+export const ALL_DEMO_TOKENS: TrackToken[] = DEMO_TRACKS.flatMap((t) => t.tokens);
 export const DEMO_WORDS: StudyWord[] = [
   { id: 1, english: "breathe", russian: "дышать", transcription: "/briːð/", example: "Breathe deeply.", exampleTranslation: "Дышите глубоко.", category: "calm", x: -1, y: 0, z: 0 },
   { id: 2, english: "focus", russian: "фокус", transcription: "/ˈfəʊkəs/", example: "Stay focused.", exampleTranslation: "Оставайся сосредоточенным.", category: "focus", x: 1, y: 0, z: 0 },
@@ -155,6 +159,3 @@ export const DEMO_WORDS: StudyWord[] = [
   { id: 9, english: "awareness", russian: "осознанность", transcription: "/əˈweənəs/", example: "Build awareness.", exampleTranslation: "Развивай осознанность.", category: "calm", x: 0, y: 0, z: 1 },
   { id: 10, english: "balance", russian: "баланс", transcription: "/ˈbæləns/", example: "Keep balance.", exampleTranslation: "Сохраняй баланс.", category: "focus", x: 0, y: 0, z: -1 },
 ];
-
-/** Combined tokens across demo tracks for the persistent player to render lyrics. */
-export const ALL_DEMO_TOKENS: TrackToken[] = DEMO_TRACKS.flatMap((t) => t.tokens);

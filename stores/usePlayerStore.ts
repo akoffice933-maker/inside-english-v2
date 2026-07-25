@@ -16,6 +16,7 @@
  */
 
 import { create } from "zustand";
+import type { TrackToken } from "@/lib/types";
 
 export type LanguageMode = "russian" | "mixed" | "english";
 
@@ -32,6 +33,7 @@ export type MiniPlayerState = {
   isFullscreen: boolean;
   language: LanguageMode;
   lastSyncedAt: number;
+  tokens: TrackToken[]; // Added tokens directly to the player state to prevent lyric collisions (Vulnerability Fix)
 };
 
 type PlayerStore = MiniPlayerState & {
@@ -45,6 +47,7 @@ type PlayerStore = MiniPlayerState & {
     coverGradient: string;
     audioUrl: string;
     duration: number;
+    tokens: TrackToken[];
   }) => void;
   togglePlay: () => Promise<void>;
   play: () => Promise<void>;
@@ -72,6 +75,7 @@ const initialState: MiniPlayerState = {
   isFullscreen: false,
   language: "mixed",
   lastSyncedAt: 0,
+  tokens: [],
 };
 
 const SYNC_INTERVAL_MS = 10_000;
@@ -79,7 +83,6 @@ const SYNC_INTERVAL_MS = 10_000;
 /**
  * Matches the existing Supabase-backed route's contract exactly:
  * POST /api/tracks/[id]/progress  body: { currentTime, duration }
- * (the route derives percentage-complete and is_completed server-side).
  */
 async function postProgress(trackId: string, currentTime: number, duration: number): Promise<void> {
   if (!duration || duration <= 0) return;
@@ -91,7 +94,6 @@ async function postProgress(trackId: string, currentTime: number, duration: numb
       keepalive: true,
     });
   } catch (err) {
-    // Soft-fail: never interrupt playback because the server is unreachable.
     if (process.env.NODE_ENV !== "production") {
       console.warn("[player] progress sync failed", err);
     }
@@ -109,7 +111,6 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
     const { audio } = get();
     if (!audio) return;
     if (get().trackId === track.id && get().audioUrl === track.audioUrl) {
-      // Same track, just re-render
       return;
     }
     audio.pause();
@@ -125,6 +126,7 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
       currentTime: 0,
       isPlaying: false,
       isLoading: true,
+      tokens: track.tokens || [], // Store the active track's tokens
     });
   },
 

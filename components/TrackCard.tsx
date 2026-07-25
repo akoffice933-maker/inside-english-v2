@@ -39,6 +39,7 @@ export default function TrackCard({ track, isPro = false }: Props) {
       coverGradient: track.coverGradient,
       audioUrl: track.audioUrl,
       duration: track.durationSec,
+      tokens: track.tokens || [],
     });
     setFullscreen(true);
     // Defer play until after the player mounts

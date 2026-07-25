@@ -24,7 +24,7 @@ type Props = {
   tokens: TrackToken[];
 };
 
-export default function PersistentPlayer({ tokens }: Props) {
+export default function PersistentPlayer({ tokens: propTokens }: Props) {
   const {
     trackId,
     title,
@@ -46,6 +46,7 @@ export default function PersistentPlayer({ tokens }: Props) {
     setFullscreen,
     setLanguage,
     togglePlay,
+    tokens, // Read tokens dynamically from the Zustand player state (fixes subtitle collision!)
   } = usePlayerStore();
 
   const reduced = useReducedMotion();
