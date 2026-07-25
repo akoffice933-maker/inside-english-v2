@@ -44,26 +44,21 @@ jobs:
         run: npm ci
 
       - name: Verify server build (Vercel target) still compiles
-        # Regression guard: next.config.js must NOT default to output:'export',
-        # or every app/api route + middleware.ts silently stops building.
+        # Regression guard: next.config.js must default to normal SSR mode
+        # (isExport === false), or every app/api route + middleware.ts
+        # silently stops building on the real Vercel deployment.
         run: npx next build
         env:
           NEXT_PUBLIC_SUPABASE_URL: "https://mock.supabase.co"
           NEXT_PUBLIC_SUPABASE_ANON_KEY: "mock-key"
 
-      - name: Build Next.js Static Export (GitHub Pages demo)
-        # GitHub Pages has no server, so dynamic app/api routes genuinely
-        # cannot ship in this build (unlike the Vercel target above) —
-        # move them aside just for this static-export pass.
-        run: |
-          mv app/api ./api_backup
-          npx next build
-          mv ./api_backup app/api
+      - name: Build Next.js Static Export
+        # Invokes the centralized static export build script from package.json
+        run: npm run export
         env:
-          BUILD_TARGET: "static"
+          NEXT_PUBLIC_BASE_PATH: "/inside-english-v2"
           NEXT_PUBLIC_SUPABASE_URL: "https://mock.supabase.co"
           NEXT_PUBLIC_SUPABASE_ANON_KEY: "mock-key"
-          NEXT_PUBLIC_BASE_PATH: "/inside-english-v2"
 
       - name: Upload Artifacts
         uses: actions/upload-pages-artifact@v3
