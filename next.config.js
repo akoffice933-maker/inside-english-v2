@@ -1,16 +1,22 @@
 /** @type {import('next').NextConfig} */
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
 
-const nextConfig = {
-  // Configures static export when running on GitHub Actions Pages deployment
-  output: 'export',
-  images: { 
-    unoptimized: true 
-  },
+// Static export (output: 'export') is only for the GitHub Pages demo build
+// and the Capacitor/iOS shell — BOTH of which strip out app/api and
+// middleware.ts entirely. The default `next build` (used by Vercel for the
+// real server deployment with API routes + middleware) must NOT use it.
+// Set BUILD_TARGET=static explicitly to opt into static export.
+const isStaticBuild = process.env.BUILD_TARGET === 'static';
 
-  // Handles nested routing when hosted on GitHub Pages subfolder (e.g. /inside-english-v2)
-  basePath: basePath,
-  assetPrefix: basePath,
+const nextConfig = {
+  ...(isStaticBuild
+    ? {
+        output: 'export',
+        images: { unoptimized: true },
+        basePath: basePath,
+        assetPrefix: basePath,
+      }
+    : {}),
 
   reactStrictMode: true,
   poweredByHeader: false,

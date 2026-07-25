@@ -1,231 +1,210 @@
-import { create } from 'zustand';
+"use client";
 
-// Interfaces based on Inside English v2.0 Architecture
-export interface Token {
-  id: number;
-  start: number;
-  end: number;
-  russian: string;
-  english: string;
-  mixed: string;
-}
+/**
+ * Global player state with Zustand.
+ * The native `HTMLAudioElement` instance is created lazily on the client
+ * and is shared across all components that subscribe to this store.
+ *
+ * Sync rule: POST /api/tracks/[id]/progress
+ *  - every 10s of continuous playback
+ *  - on pause()
+ *  - on ended
+ *
+ * NOTE: `trackId` is a string (Supabase `tracks.id` is a UUID), and the
+ * progress sync payload matches the existing Supabase-backed route's
+ * contract: { currentTime, duration } — NOT { positionSec, completed }.
+ */
 
-export interface Track {
-  id: string;
+import { create } from "zustand";
+
+export type LanguageMode = "russian" | "mixed" | "english";
+
+export type MiniPlayerState = {
+  trackId: string | null;
   title: string;
-  description: string;
-  type: 'mindtrack' | 'hypno';
-  level: 'A0' | 'A1' | 'A2' | 'B1' | 'B2' | 'C1';
-  state: 'relax' | 'energy' | 'sleep';
-  audio_url: string;
+  artist: string;
+  coverGradient: string;
+  audioUrl: string;
   duration: number;
-  cover_gradient: string;
-  is_premium: boolean;
-  tokens: Token[];
-}
-
-interface PlayerState {
-  // Playback State
-  activeTrack: Track | null;
-  isPlaying: boolean;
   currentTime: number;
-  duration: number;
-  playbackRate: number;
-  languageMode: 'russian' | 'mixed' | 'english';
-  
-  // Audio Element Ref (maintained globally for background play & page persistent state)
-  audio: HTMLAudioElement | null;
-  
-  // UI Panels
-  shadowingOpen: boolean;
-  isRecordingShadowing: boolean;
+  isPlaying: boolean;
+  isLoading: boolean;
+  isFullscreen: boolean;
+  language: LanguageMode;
+  lastSyncedAt: number;
+};
 
-  // Actions / Methods
-  setTrack: (track: Track) => void;
-  play: () => void;
+type PlayerStore = MiniPlayerState & {
+  audio: HTMLAudioElement | null;
+  syncTimer: ReturnType<typeof setInterval> | null;
+  setAudio: (audio: HTMLAudioElement) => void;
+  loadTrack: (track: {
+    id: string;
+    title: string;
+    artist: string;
+    coverGradient: string;
+    audioUrl: string;
+    duration: number;
+  }) => void;
+  togglePlay: () => Promise<void>;
+  play: () => Promise<void>;
   pause: () => void;
-  togglePlay: () => void;
-  setCurrentTime: (time: number) => void;
-  seek: (seconds: number) => void;
-  setPlaybackRate: (rate: number) => void;
-  setLanguageMode: (mode: 'russian' | 'mixed' | 'english') => void;
-  toggleShadowing: () => void;
-  setRecordingShadowing: (isRecording: boolean) => void;
-  
-  // API Syncing
-  syncProgressToServer: () => Promise<void>;
-  lastSyncedTime: number; // Prevent spamming backend API
+  seek: (time: number) => void;
+  setCurrentTime: (t: number) => void;
+  setDuration: (d: number) => void;
+  setLoading: (b: boolean) => void;
+  setFullscreen: (b: boolean) => void;
+  setLanguage: (l: LanguageMode) => void;
+  stop: () => void;
+  reset: () => void;
+};
+
+const initialState: MiniPlayerState = {
+  trackId: null,
+  title: "",
+  artist: "",
+  coverGradient: "from-[#6C3CE1] to-[#E94057]",
+  audioUrl: "",
+  duration: 0,
+  currentTime: 0,
+  isPlaying: false,
+  isLoading: false,
+  isFullscreen: false,
+  language: "mixed",
+  lastSyncedAt: 0,
+};
+
+const SYNC_INTERVAL_MS = 10_000;
+
+/**
+ * Matches the existing Supabase-backed route's contract exactly:
+ * POST /api/tracks/[id]/progress  body: { currentTime, duration }
+ * (the route derives percentage-complete and is_completed server-side).
+ */
+async function postProgress(trackId: string, currentTime: number, duration: number): Promise<void> {
+  if (!duration || duration <= 0) return;
+  try {
+    await fetch(`/api/tracks/${trackId}/progress`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentTime, duration }),
+      keepalive: true,
+    });
+  } catch (err) {
+    // Soft-fail: never interrupt playback because the server is unreachable.
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[player] progress sync failed", err);
+    }
+  }
 }
 
-export const usePlayerStore = create<PlayerState>((set, get) => {
-  
-  // Helper to initialize HTML5 Audio on the client side safely
-  const getOrInitAudio = (url: string) => {
-    if (typeof window === 'undefined') return null;
-    
+export const usePlayerStore = create<PlayerStore>((set, get) => ({
+  ...initialState,
+  audio: null,
+  syncTimer: null,
+
+  setAudio: (audio) => set({ audio }),
+
+  loadTrack: (track) => {
     const { audio } = get();
-    if (audio) {
-      audio.pause();
-      audio.src = url;
-      audio.load();
-      return audio;
+    if (!audio) return;
+    if (get().trackId === track.id && get().audioUrl === track.audioUrl) {
+      // Same track, just re-render
+      return;
     }
+    audio.pause();
+    audio.src = track.audioUrl;
+    audio.load();
+    set({
+      trackId: track.id,
+      title: track.title,
+      artist: track.artist,
+      coverGradient: track.coverGradient,
+      audioUrl: track.audioUrl,
+      duration: track.duration,
+      currentTime: 0,
+      isPlaying: false,
+      isLoading: true,
+    });
+  },
 
-    const newAudio = new Audio(url);
-    
-    // Wire up native audio events to update Zustand state
-    newAudio.addEventListener('timeupdate', () => {
-      const current = newAudio.currentTime;
-      set({ currentTime: current });
-      
-      // Throttle server sync: sync progress every 10 seconds of active playback
-      const { lastSyncedTime, activeTrack } = get();
-      if (activeTrack && Math.abs(current - lastSyncedTime) >= 10) {
-        get().syncProgressToServer();
+  play: async () => {
+    const { audio, syncTimer } = get();
+    if (!audio) return;
+    try {
+      await audio.play();
+      set({ isPlaying: true });
+      if (!syncTimer && get().trackId) {
+        const id = get().trackId;
+        const t = setInterval(() => {
+          const { audio: a, isPlaying: p, duration: d } = get();
+          if (!a || !p || !id) return;
+          void postProgress(id, Math.floor(a.currentTime), d);
+        }, SYNC_INTERVAL_MS);
+        set({ syncTimer: t });
       }
-    });
-
-    newAudio.addEventListener('durationchange', () => {
-      set({ duration: newAudio.duration });
-    });
-
-    newAudio.addEventListener('ended', () => {
+    } catch (err) {
+      console.warn("[player] play() rejected", err);
       set({ isPlaying: false });
-      get().syncProgressToServer(); // Sync final completed state
-    });
-
-    return newAudio;
-  };
-
-  return {
-    // Initial State Values
-    activeTrack: null,
-    isPlaying: false,
-    currentTime: 0,
-    duration: 0,
-    playbackRate: 1.0,
-    languageMode: 'mixed',
-    audio: null,
-    shadowingOpen: false,
-    isRecordingShadowing: false,
-    lastSyncedTime: 0,
-
-    // Core Controls
-    setTrack: (track: Track) => {
-      const audioEl = getOrInitAudio(track.audio_url);
-      
-      if (audioEl) {
-        audioEl.playbackRate = get().playbackRate;
-      }
-
-      set({
-        activeTrack: track,
-        currentTime: 0,
-        duration: track.duration || 0,
-        isPlaying: false,
-        audio: audioEl,
-        lastSyncedTime: 0
-      });
-
-      // Automatically play if user initiates from a click
-      get().play();
-    },
-
-    play: () => {
-      const { audio, isPlaying } = get();
-      if (audio && !isPlaying) {
-        audio.play()
-          .then(() => set({ isPlaying: true }))
-          .catch((err) => console.warn("Media playback blocked by browser. User gesture required first.", err));
-      }
-    },
-
-    pause: () => {
-      const { audio, isPlaying } = get();
-      if (audio && isPlaying) {
-        audio.pause();
-        set({ isPlaying: false });
-        // Sync progress when user pauses
-        get().syncProgressToServer();
-      }
-    },
-
-    togglePlay: () => {
-      const { isPlaying } = get();
-      if (isPlaying) {
-        get().pause();
-      } else {
-        get().play();
-      }
-    },
-
-    setCurrentTime: (time: number) => {
-      set({ currentTime: time });
-    },
-
-    seek: (seconds: number) => {
-      const { audio, duration } = get();
-      if (audio) {
-        const newTime = Math.min(duration, Math.max(0, seconds));
-        audio.currentTime = newTime;
-        set({ currentTime: newTime });
-      }
-    },
-
-    setPlaybackRate: (rate: number) => {
-      const { audio } = get();
-      if (audio) {
-        audio.playbackRate = rate;
-      }
-      set({ playbackRate: rate });
-    },
-
-    setLanguageMode: (mode) => {
-      set({ languageMode: mode });
-    },
-
-    toggleShadowing: () => {
-      set((state) => ({ shadowingOpen: !state.shadowingOpen }));
-    },
-
-    setRecordingShadowing: (isRecording: boolean) => {
-      set({ isRecordingShadowing: isRecording });
-    },
-
-    // Syncing logic to invoke POST /api/tracks/[id]/progress
-    syncProgressToServer: async () => {
-      const { activeTrack, currentTime, duration } = get();
-      if (!activeTrack) return;
-
-      // Update last synced marker before request is completed to block race conditions
-      set({ lastSyncedTime: currentTime });
-
-      try {
-        const response = await fetch(`/api/tracks/${activeTrack.id}/progress`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            currentTime,
-            duration: duration || activeTrack.duration
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`Sync failed with status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        console.log('Progress synced successfully:', data);
-        
-        // If progress completed, we can trigger local notifications, toast banners, or UI updates.
-        if (data.data?.newlyCompleted) {
-          console.log('🎉 Track completed! Metics updated:', data.data.updatedStats);
-        }
-      } catch (err) {
-        console.error('Failed to sync progress with the backend database:', err);
-      }
     }
-  };
-});
+  },
+
+  pause: () => {
+    const { audio, syncTimer, trackId, currentTime, duration } = get();
+    if (!audio) return;
+    audio.pause();
+    set({ isPlaying: false });
+    if (trackId) void postProgress(trackId, Math.floor(currentTime), duration);
+    if (syncTimer) {
+      clearInterval(syncTimer);
+      set({ syncTimer: null });
+    }
+  },
+
+  togglePlay: async () => {
+    if (get().isPlaying) get().pause();
+    else await get().play();
+  },
+
+  seek: (time) => {
+    const { audio, duration } = get();
+    if (!audio) return;
+    const clamped = Math.max(0, Math.min(time, duration || audio.duration || 0));
+    audio.currentTime = clamped;
+    set({ currentTime: clamped });
+  },
+
+  setCurrentTime: (t) => set({ currentTime: t }),
+  setDuration: (d) => set({ duration: d }),
+  setLoading: (b) => set({ isLoading: b }),
+  setFullscreen: (b) => set({ isFullscreen: b }),
+  setLanguage: (l) => set({ language: l }),
+
+  stop: () => {
+    const { audio, syncTimer, trackId, currentTime, duration } = get();
+    if (audio) {
+      if (trackId) void postProgress(trackId, Math.floor(currentTime), duration);
+      audio.pause();
+      audio.currentTime = 0;
+    }
+    if (syncTimer) clearInterval(syncTimer);
+    set({ ...initialState, syncTimer: null });
+  },
+
+  reset: () => {
+    const { syncTimer } = get();
+    if (syncTimer) clearInterval(syncTimer);
+    set({ ...initialState, audio: get().audio, syncTimer: null });
+  },
+}));
+
+/** Returns the current token to highlight given the audio time and tokens array. */
+export function findActiveTokenIndex<T extends { start: number; end: number }>(
+  tokens: T[],
+  time: number,
+): number {
+  for (let i = 0; i < tokens.length; i++) {
+    if (time >= tokens[i].start && time <= tokens[i].end) return i;
+  }
+  return -1;
+}

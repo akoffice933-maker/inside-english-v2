@@ -1,233 +1,389 @@
-'use client';
+"use client";
 
-import React, { useState } from 'react';
+import Link from "next/link";
+import { motion, useReducedMotion } from "framer-motion";
+import { Sparkles, Mic, Headphones, Brain, Shield, Zap, ArrowRight, Check, Star } from "lucide-react";
+import { springs, reducedMotionTransition } from "@/lib/animations";
+import { DEMO_WORDS, DEMO_TRACKS } from "@/lib/seed-data";
+import InteractiveStudyDemo from "@/components/InteractiveStudyDemo";
+import { cn } from "@/lib/utils";
+import { TelegramSDK } from "@/lib/telegram";
 
-export default function MarketingLandingPage() {
-  const [activeTab, setActiveState] = useState<'relax' | 'energy' | 'sleep'>('relax');
+const FEATURES = [
+  {
+    Icon: Brain,
+    title: "Состояние потока",
+    body: "Учите английский, когда вы расслаблены и сосредоточены. Без зубрёжки — через осознанность.",
+    gradient: "from-[#6C3CE1] to-[#7B61FF]",
+  },
+  {
+    Icon: Headphones,
+    title: "Синхронные тексты",
+    body: "Каждое слово подсвечивается в реальном времени. Переключайте RU / EN / микс — мгновенно, без перезагрузки.",
+    gradient: "from-[#E94057] to-[#FF7A5B]",
+  },
+  {
+    Icon: Mic,
+    title: "Shadowing с ИИ-оценкой",
+    body: "Произнесите фразу — алгоритм Нидлмана-Вунша оценит совпадение и укажет ошибки.",
+    gradient: "from-[#5B5BFF] to-[#7B61FF]",
+  },
+  {
+    Icon: Shield,
+    title: "Оффлайн на iOS",
+    body: "PWA с поддержкой HTTP 206 Range. Слушайте уроки в самолёте и без сети.",
+    gradient: "from-[#3A1F7A] to-[#6C3CE1]",
+  },
+];
 
-  // Interactive mood feature triggers for demo preview
-  const moodPreviews = {
-    relax: {
-      emoji: '🧘',
-      title: 'Расслабление и природа',
-      text: 'Изучайте язык под шелест листвы, шум океана и мягкие расслабляющие тексты. Никакого стресса — только плавное погружение.',
-      gradient: 'from-[#0A5C36] to-[#022E1B]',
-      sample: 'Сегодня я проснулся early. Солнце is shining ярко. Я чувствую calm...'
-    },
-    energy: {
-      emoji: '⚡',
-      title: 'Энергия и фокус',
-      text: 'Динамичные MindTracks о бизнесе, саморазвитии и мотивации. Зарядитесь уверенностью на английском перед началом рабочего дня.',
-      gradient: 'from-[#6C3CE1] to-[#E94057]',
-      sample: 'I am ready to build my dream. Каждый шаг leads to success...'
-    },
-    sleep: {
-      emoji: '🌙',
-      title: 'Гипно-сон и медитации',
-      text: 'Медленные речевые сессии перед сном. Мягкий голос погрузит вас в сон, транслируя базовые фразы прямо в подсознание.',
-      gradient: 'from-[#2B1B4D] to-[#1A1A2E]',
-      sample: 'Close your eyes. Глубокий вдох... You are safe. Засыпай...'
-    }
-  };
+const STEPS = [
+  { num: "01", title: "Выберите состояние", body: "Calm, Focus, Energy или Sleep — мы подберём подходящие треки." },
+  { num: "02", title: "Слушайте с подсветкой", body: "Синхронный текст, переключатель языка, плавная анимация." },
+  { num: "03", title: "Повторяйте вслух", body: "Shadowing оценит ваше произношение по 4 метрикам." },
+  { num: "04", title: "Расширяйте словарь", body: "3D-карта слов и квизы с тактильной обратной связью." },
+];
+
+const PRICING = [
+  {
+    name: "Free",
+    price: "0",
+    period: "навсегда",
+    features: ["Базовые треки", "3D-словарь", "5 квизов в день"],
+    cta: "Начать бесплатно",
+    highlight: false,
+  },
+  {
+    name: "PRO",
+    price: "990",
+    period: "₽ / месяц",
+    features: [
+      "Все PRO-треки",
+      "Shadowing без лимитов",
+      "Оффлайн-режим в PWA",
+      "Push-напоминания",
+      "Без рекламы",
+    ],
+    cta: "Попробовать 7 дней",
+    highlight: true,
+  },
+  {
+    name: "Lifetime",
+    price: "9 990",
+    period: "₽ единоразово",
+    features: ["Всё из PRO", "Все будущие курсы", "Приоритетная поддержка"],
+    cta: "Купить навсегда",
+    highlight: false,
+  },
+];
+
+const TESTIMONIALS = [
+  { name: "Анна К.", text: "Наконец-то я могу учить английский, не чувствуя зубрёжки. Это как медитация.", stars: 5 },
+  { name: "Дмитрий С.", text: "Shadowing выявил мои типичные ошибки за 2 недели. Прогресс заметен.", stars: 5 },
+  { name: "Мария Л.", text: "В Telegram Mini App выглядит нативно. Слушаю в метро каждый день.", stars: 5 },
+];
+
+export default function LandingPage() {
+  const reduced = useReducedMotion();
 
   return (
-    <div className="min-h-screen bg-[#0D0D14] text-white font-sans selection:bg-[#6C3CE1]/30 overflow-x-hidden">
-      
-      {/* 1. HERO SECTION */}
-      <section className="relative pt-20 pb-16 px-6 text-center space-y-8 max-w-2xl mx-auto">
-        <div className="absolute top-[-100px] left-1/2 transform -translate-x-1/2 w-[350px] h-[350px] rounded-full blur-[130px] bg-[#6C3CE1]/20 pointer-events-none z-0" />
-
-        <div className="space-y-4 relative z-10">
-          <span className="bg-[#7B61FF]/10 text-[#7B61FF] border border-[#7B61FF]/20 text-[10px] font-extrabold px-3.5 py-1.5 rounded-full uppercase tracking-wider">
-            Экосистема Inside English v2.0
-          </span>
-          <h1 className="text-4xl md:text-5xl font-light font-serif tracking-tight leading-tight mt-3">
-            Язык через <br />
-            <span className="font-semibold bg-gradient-to-r from-[#6C3CE1] to-[#E94057] bg-clip-text text-transparent">
-              погружение и осознанность
-            </span>
-          </h1>
-          <p className="text-sm md:text-base text-[#A0A0B0] font-light max-w-md mx-auto leading-relaxed">
-            Забудьте про зубрежку, таймеры и стресс. Изучайте английский как приятный утренний ритуал или вечернюю медитацию под мягкие гипно-треки.
-          </p>
+    <div className="relative min-h-screen overflow-x-hidden">
+      {/* Nav */}
+      <header className="sticky top-0 z-20 border-b border-white/5 bg-[#0D0D14]/80 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
+          <Link href="/" className="flex items-center gap-2.5">
+            <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-[#6C3CE1] to-[#E94057] shadow-glow-purple">
+              <Sparkles size={18} className="text-white" />
+            </div>
+            <span className="text-base font-bold text-white">Inside English</span>
+          </Link>
+          <nav className="hidden items-center gap-6 text-sm text-white/70 sm:flex">
+            <a href="#features" className="hover:text-white">Возможности</a>
+            <a href="#how" className="hover:text-white">Как это работает</a>
+            <a href="#demo" className="hover:text-white">Демо</a>
+            <a href="#pricing" className="hover:text-white">Тарифы</a>
+          </nav>
+          <Link
+            href="/"
+            className="rounded-full bg-white px-4 py-2 text-sm font-bold text-[#0D0D14]"
+          >
+            Открыть приложение
+          </Link>
         </div>
+      </header>
 
-        {/* Core CTA Buttons */}
-        <div className="flex flex-col sm:flex-row justify-center gap-3.5 relative z-10 max-w-sm mx-auto">
-          <a 
-            href="https://t.me/InsideEnglish_bot/app" 
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex-1 bg-gradient-to-r from-[#6C3CE1] to-[#E94057] hover:brightness-110 py-3.5 px-6 rounded-2xl text-xs font-bold tracking-wider uppercase transition shadow-lg shadow-[#6C3CE1]/20 flex items-center justify-center space-x-2 text-white"
+      {/* HERO */}
+      <section className="relative px-4 py-16 sm:px-6 sm:py-24">
+        <div className="mx-auto max-w-5xl text-center">
+          <motion.div
+            initial={reduced ? { opacity: 0 } : { opacity: 0, y: 14 }}
+            animate={reduced ? { opacity: 1 } : { opacity: 1, y: 0 }}
+            transition={reduced ? reducedMotionTransition : springs.gentle}
+            className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/70"
           >
-            <span>🚀 Открыть в Telegram</span>
-          </a>
-          <a 
-            href="/demo" 
-            className="flex-1 bg-white/5 hover:bg-white/10 border border-white/5 py-3.5 px-6 rounded-2xl text-xs font-bold tracking-wider uppercase transition text-white"
+            <Star size={12} className="text-amber-400" fill="currentColor" />
+            <span>4.9 ★ — 12 800 учеников</span>
+          </motion.div>
+
+          <motion.h1
+            initial={reduced ? { opacity: 0 } : { opacity: 0, y: 18 }}
+            animate={reduced ? { opacity: 1 } : { opacity: 1, y: 0 }}
+            transition={reduced ? reducedMotionTransition : { ...springs.gentle, delay: 0.05 }}
+            className="text-4xl font-extrabold leading-[1.05] tracking-tight sm:text-6xl"
           >
-            Попробовать Web-версию
-          </a>
+            Английский, который
+            <br />
+            <span className="text-gradient-primary text-glow-purple">чувствуется</span>, а не зубрится
+          </motion.h1>
+
+          <motion.p
+            initial={reduced ? { opacity: 0 } : { opacity: 0, y: 18 }}
+            animate={reduced ? { opacity: 1 } : { opacity: 1, y: 0 }}
+            transition={reduced ? reducedMotionTransition : { ...springs.gentle, delay: 0.1 }}
+            className="mx-auto mt-5 max-w-2xl text-base text-white/60 sm:text-lg"
+          >
+            Inside English — премиальное приложение для изучения английского через состояние
+            расслабления и осознанности. Синхронные тексты, теневой анализ произношения и 3D-словарь.
+          </motion.p>
+
+          <motion.div
+            initial={reduced ? { opacity: 0 } : { opacity: 0, y: 18 }}
+            animate={reduced ? { opacity: 1 } : { opacity: 1, y: 0 }}
+            transition={reduced ? reducedMotionTransition : { ...springs.gentle, delay: 0.15 }}
+            className="mt-8 flex flex-wrap items-center justify-center gap-3"
+          >
+            <Link
+              href="/"
+              onClick={() => TelegramSDK.triggerHaptic("medium")}
+              className="group flex items-center gap-2 rounded-full bg-gradient-to-r from-[#6C3CE1] to-[#E94057] px-6 py-3 text-sm font-bold text-white shadow-glow-purple"
+            >
+              Попробовать бесплатно
+              <ArrowRight size={16} className="transition-transform group-hover:translate-x-0.5" />
+            </Link>
+            <a
+              href="#demo"
+              className="rounded-full border border-white/15 bg-white/5 px-6 py-3 text-sm font-semibold text-white"
+            >
+              Смотреть демо
+            </a>
+          </motion.div>
+
+          <div className="mt-12 flex flex-wrap items-center justify-center gap-x-8 gap-y-2 text-xs text-white/50">
+            <span className="flex items-center gap-1.5"><Check size={12} className="text-emerald-400" /> Web PWA</span>
+            <span className="flex items-center gap-1.5"><Check size={12} className="text-emerald-400" /> iOS / Android (Capacitor)</span>
+            <span className="flex items-center gap-1.5"><Check size={12} className="text-emerald-400" /> Telegram Mini App</span>
+          </div>
         </div>
       </section>
 
-      {/* 2. VALUE PROPOSITION: MOOD-BASED LEARNING */}
-      <section className="px-6 py-12 max-w-md mx-auto space-y-8 relative">
-        <div className="text-center space-y-2">
-          <h2 className="text-xl md:text-2xl font-bold tracking-tight font-serif">Ваше настроение — ваш учебник</h2>
-          <p className="text-xs text-[#A0A0B0] font-light">Выберите ваше эмоциональное состояние, а система сама подберет идеальную практику.</p>
-        </div>
-
-        {/* Tab triggers */}
-        <div className="grid grid-cols-3 gap-2 bg-[#1A1A2E]/40 p-1.5 rounded-2xl border border-white/5">
-          {Object.keys(moodPreviews).map((key) => {
-            const isSelected = activeTab === key;
-            const item = moodPreviews[key as keyof typeof moodPreviews];
-            return (
-              <button
-                key={key}
-                onClick={() => setActiveState(key as any)}
-                className={`py-3 px-2 rounded-xl flex flex-col items-center justify-center transition-all ${
-                  isSelected 
-                    ? 'bg-[#6C3CE1]/20 border border-[#6C3CE1]/40 text-white' 
-                    : 'text-[#A0A0B0] hover:text-white'
-                }`}
+      {/* FEATURES */}
+      <section id="features" className="relative px-4 py-16 sm:px-6">
+        <div className="mx-auto max-w-6xl">
+          <SectionTitle eyebrow="Возможности" title="Глубокий дизайн, мгновенный отклик" />
+          <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {FEATURES.map((f, i) => (
+              <motion.div
+                key={f.title}
+                initial={reduced ? { opacity: 0 } : { opacity: 0, y: 12 }}
+                whileInView={reduced ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-50px" }}
+                transition={reduced ? reducedMotionTransition : { ...springs.gentle, delay: i * 0.06 }}
+                className="glass-panel relative overflow-hidden p-5"
               >
-                <span className="text-lg mb-1">{item.emoji}</span>
-                <span className="text-[10px] font-semibold">{key === 'relax' ? 'Расслабиться' : key === 'energy' ? 'Настроиться' : 'Ко сну'}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Dynamic Card Preview */}
-        <div className="glass-panel p-5 rounded-3xl space-y-4 shadow-xl border border-white/5 relative overflow-hidden transition-all duration-300">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-white/5 rounded-full blur-xl" />
-          
-          <div className="space-y-1">
-            <h3 className="font-serif text-lg font-bold flex items-center space-x-2">
-              <span>{moodPreviews[activeTab].emoji}</span>
-              <span>{moodPreviews[activeTab].title}</span>
-            </h3>
-            <p className="text-xs text-[#A0A0B0] font-light leading-relaxed">
-              {moodPreviews[activeTab].text}
-            </p>
+                <div className={cn("mb-4 grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br shadow-glow-purple", f.gradient)}>
+                  <f.Icon size={20} className="text-white" />
+                </div>
+                <h3 className="text-lg font-bold text-white">{f.title}</h3>
+                <p className="mt-1.5 text-sm text-white/60">{f.body}</p>
+              </motion.div>
+            ))}
           </div>
+        </div>
+      </section>
 
-          {/* Interactive Player Text Highlight Demo */}
-          <div className="bg-black/30 rounded-2xl p-4 border border-white/5 space-y-2">
-            <span className="text-[9px] text-[#7B61FF] font-bold uppercase tracking-wider">Демо-звучание:</span>
-            <p className="text-xs font-serif italic text-white/90 leading-relaxed">
-              {moodPreviews[activeTab].sample}
-            </p>
-            <div className="w-full bg-[#1F1F35] h-1 rounded-full mt-2 relative overflow-hidden">
-              <div 
-                className="absolute top-0 left-0 bottom-0 bg-gradient-to-r from-[#6C3CE1] to-[#E94057] transition-all duration-1000"
-                style={{ width: activeTab === 'relax' ? '45%' : activeTab === 'energy' ? '75%' : '20%' }}
-              />
+      {/* HOW IT WORKS */}
+      <section id="how" className="relative px-4 py-16 sm:px-6">
+        <div className="mx-auto max-w-5xl">
+          <SectionTitle eyebrow="Как это работает" title="4 шага к разговорному английскому" />
+          <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {STEPS.map((s, i) => (
+              <motion.div
+                key={s.num}
+                initial={reduced ? { opacity: 0 } : { opacity: 0, y: 12 }}
+                whileInView={reduced ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-50px" }}
+                transition={reduced ? reducedMotionTransition : { ...springs.gentle, delay: i * 0.05 }}
+                className="glass-panel p-5"
+              >
+                <div className="text-gradient-primary text-3xl font-extrabold">{s.num}</div>
+                <h4 className="mt-2 text-base font-bold text-white">{s.title}</h4>
+                <p className="mt-1 text-sm text-white/60">{s.body}</p>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* INTERACTIVE DEMO */}
+      <section id="demo" className="relative px-4 py-16 sm:px-6">
+        <div className="mx-auto max-w-5xl">
+          <SectionTitle eyebrow="Интерактив" title="Попробуйте прямо сейчас" />
+          <div className="mt-8">
+            <InteractiveStudyDemo words={DEMO_WORDS} />
+          </div>
+        </div>
+      </section>
+
+      {/* TRACK PREVIEW */}
+      <section className="relative px-4 py-16 sm:px-6">
+        <div className="mx-auto max-w-5xl">
+          <SectionTitle eyebrow="Библиотека" title="Треки, подобранные под состояние" />
+          <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {DEMO_TRACKS.slice(0, 6).map((t) => (
+              <Link
+                key={t.id}
+                href="/library"
+                className="group flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 transition-colors hover:bg-white/[0.07]"
+              >
+                <div className={cn("h-12 w-12 shrink-0 rounded-xl bg-gradient-to-br shadow-glow-purple", t.coverGradient)} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-white">{t.title}</div>
+                  <div className="truncate text-xs text-white/50">{t.artist}</div>
+                </div>
+                <ArrowRight size={16} className="text-white/40 transition-transform group-hover:translate-x-1" />
+              </Link>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* PRICING */}
+      <section id="pricing" className="relative px-4 py-16 sm:px-6">
+        <div className="mx-auto max-w-5xl">
+          <SectionTitle eyebrow="Тарифы" title="Простая подписка" />
+          <div className="mt-10 grid grid-cols-1 gap-5 lg:grid-cols-3">
+            {PRICING.map((p, i) => (
+              <motion.div
+                key={p.name}
+                initial={reduced ? { opacity: 0 } : { opacity: 0, y: 14 }}
+                whileInView={reduced ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-50px" }}
+                transition={reduced ? reducedMotionTransition : { ...springs.gentle, delay: i * 0.06 }}
+                className={cn(
+                  "relative overflow-hidden rounded-3xl border p-6",
+                  p.highlight
+                    ? "border-white/30 bg-gradient-to-br from-[#6C3CE1]/30 to-[#E94057]/30 shadow-glow-purple"
+                    : "border-white/10 bg-white/[0.04]",
+                )}
+              >
+                {p.highlight && (
+                  <div className="absolute right-4 top-4 rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-[#0D0D14]">
+                    ХИТ
+                  </div>
+                )}
+                <div className="text-sm font-medium text-white/60">{p.name}</div>
+                <div className="mt-2 flex items-baseline gap-1">
+                  <span className="text-4xl font-extrabold text-white">{p.price}</span>
+                  <span className="text-sm text-white/60">{p.period}</span>
+                </div>
+                <ul className="mt-5 space-y-2 text-sm text-white/80">
+                  {p.features.map((f) => (
+                    <li key={f} className="flex items-start gap-2">
+                      <Check size={14} className="mt-0.5 shrink-0 text-emerald-400" />
+                      <span>{f}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Link
+                  href="/"
+                  className={cn(
+                    "mt-6 block rounded-full px-4 py-2.5 text-center text-sm font-bold",
+                    p.highlight
+                      ? "bg-white text-[#0D0D14]"
+                      : "border border-white/20 bg-white/5 text-white",
+                  )}
+                >
+                  {p.cta}
+                </Link>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* TESTIMONIALS */}
+      <section className="relative px-4 py-16 sm:px-6">
+        <div className="mx-auto max-w-5xl">
+          <SectionTitle eyebrow="Отзывы" title="Что говорят ученики" />
+          <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {TESTIMONIALS.map((t, i) => (
+              <motion.div
+                key={t.name}
+                initial={reduced ? { opacity: 0 } : { opacity: 0, y: 12 }}
+                whileInView={reduced ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-50px" }}
+                transition={reduced ? reducedMotionTransition : { ...springs.gentle, delay: i * 0.05 }}
+                className="glass-panel p-5"
+              >
+                <div className="mb-2 flex items-center gap-0.5 text-amber-400">
+                  {Array.from({ length: t.stars }).map((_, idx) => (
+                    <Star key={idx} size={14} fill="currentColor" />
+                  ))}
+                </div>
+                <p className="text-sm text-white/80">«{t.text}»</p>
+                <div className="mt-3 text-xs font-semibold text-white/50">— {t.name}</div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CTA */}
+      <section className="relative px-4 py-20 sm:px-6">
+        <div className="mx-auto max-w-4xl">
+          <div className="glass-panel relative overflow-hidden p-10 text-center sm:p-14">
+            <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-[#6C3CE1] opacity-30 blur-3xl" />
+            <div className="absolute -left-20 -bottom-20 h-64 w-64 rounded-full bg-[#E94057] opacity-30 blur-3xl" />
+            <div className="relative">
+              <Zap size={24} className="mx-auto text-[#7B61FF]" />
+              <h2 className="mt-3 text-3xl font-extrabold text-white sm:text-4xl">
+                Готовы начать?
+              </h2>
+              <p className="mx-auto mt-2 max-w-md text-sm text-white/60">
+                Присоединяйтесь к 12 800 ученикам, которые учат английский через состояние потока.
+              </p>
+              <Link
+                href="/"
+                className="mt-6 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#6C3CE1] to-[#E94057] px-6 py-3 text-sm font-bold text-white shadow-glow-purple"
+              >
+                Открыть приложение <ArrowRight size={16} />
+              </Link>
             </div>
           </div>
         </div>
       </section>
 
-      {/* 3. CORE FEATURES GRID */}
-      <section className="px-6 py-12 max-w-md mx-auto space-y-8">
-        <h2 className="text-xl font-bold tracking-tight font-serif text-center">Почему Inside English v2.0?</h2>
-        
-        <div className="grid grid-cols-1 gap-4">
-          <div className="glass-panel p-5 rounded-3xl flex space-x-4 items-start">
-            <span className="text-2xl p-3 bg-[#6C3CE1]/10 rounded-2xl">🧘</span>
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-white">Никакого геймификационного стресса</h4>
-              <p className="text-xs text-[#A0A0B0] font-light leading-relaxed">
-                Мы не отнимаем жизни, не заводим таймеры и не заставляем конкурировать в таблицах лидеров. Только комфортный темп.
-              </p>
-            </div>
-          </div>
-
-          <div className="glass-panel p-5 rounded-3xl flex space-x-4 items-start">
-            <span className="text-2xl p-3 bg-[#E94057]/10 rounded-2xl">🎤</span>
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-white">Интерактивный ИИ-Shadowing</h4>
-              <p className="text-xs text-[#A0A0B0] font-light leading-relaxed">
-                Повторяйте фразы за диктором. Наш искусственный интеллект проанализирует произношение каждого слова и мягко укажет на ошибки.
-              </p>
-            </div>
-          </div>
-
-          <div className="glass-panel p-5 rounded-3xl flex space-x-4 items-start">
-            <span className="text-2xl p-3 bg-yellow-500/10 rounded-2xl">📊</span>
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-white">Осознанное Колесо Баланса</h4>
-              <p className="text-xs text-[#A0A0B0] font-light leading-relaxed">
-                Отслеживайте прогресс в интуитивном Колесе Баланса. Никаких сухих графиков — только визуальный баланс навыков.
-              </p>
-            </div>
-          </div>
+      <footer className="border-t border-white/5 px-4 py-8 sm:px-6">
+        <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-2 text-xs text-white/40 sm:flex-row">
+          <div>© {new Date().getFullYear()} Inside English</div>
+          <div>Web · iOS · Android · Telegram Mini App</div>
         </div>
-      </section>
-
-      {/* 4. PLATFORMS / DOWNLOADS CTA */}
-      <section className="px-6 py-12 max-w-md mx-auto space-y-8 text-center relative">
-        <div className="absolute bottom-[-100px] left-1/2 transform -translate-x-1/2 w-[300px] h-[300px] rounded-full blur-[120px] bg-[#E94057]/15 pointer-events-none z-0" />
-
-        <div className="space-y-2 relative z-10">
-          <h2 className="text-xl md:text-2xl font-bold tracking-tight font-serif">Занимайтесь везде</h2>
-          <p className="text-xs text-[#A0A0B0] font-light">Доступно на любом вашем устройстве с автоматической синхронизацией прогресса через Supabase Cloud.</p>
-        </div>
-
-        {/* Buttons */}
-        <div className="space-y-3 relative z-10">
-          <a 
-            href="https://t.me/InsideEnglish_bot/app" 
-            target="_blank"
-            rel="noopener noreferrer"
-            className="w-full bg-[#1A1A2E]/60 border border-white/5 hover:border-[#7B61FF]/40 py-4 px-5 rounded-2xl flex items-center justify-between transition-all"
-          >
-            <div className="flex items-center space-x-3.5">
-              <span className="text-xl">✈️</span>
-              <div className="text-left">
-                <h4 className="text-xs font-bold">Telegram Mini App</h4>
-                <p className="text-[10px] text-[#A0A0B0] font-light mt-0.5">Запуск мгновенно без установки</p>
-              </div>
-            </div>
-            <span className="text-xs text-[#7B61FF]">Открыть →</span>
-          </a>
-
-          <div 
-            className="w-full bg-[#1A1A2E]/60 border border-white/5 py-4 px-5 rounded-2xl flex items-center justify-between"
-          >
-            <div className="flex items-center space-x-3.5">
-              <span className="text-xl">🍏</span>
-              <div className="text-left">
-                <h4 className="text-xs font-bold">iOS App Store</h4>
-                <p className="text-[10px] text-[#A0A0B0] font-light mt-0.5">Встроенные покупки и фоновый звук</p>
-              </div>
-            </div>
-            <span className="text-[10px] bg-white/10 px-2 py-0.5 rounded-full uppercase tracking-wider text-white font-bold">Скоро</span>
-          </div>
-
-          <div 
-            className="w-full bg-[#1A1A2E]/60 border border-white/5 py-4 px-5 rounded-2xl flex items-center justify-between"
-          >
-            <div className="flex items-center space-x-3.5">
-              <span className="text-xl">📲</span>
-              <div className="text-left">
-                <h4 className="text-xs font-bold">PWA Web App</h4>
-                <p className="text-[10px] text-[#A0A0B0] font-light mt-0.5">Автономная работа на любом смартфоне</p>
-              </div>
-            </div>
-            <span className="text-[10px] bg-white/10 px-2 py-0.5 rounded-full uppercase tracking-wider text-white font-bold">Доступно</span>
-          </div>
-        </div>
-      </section>
-
-      {/* 5. FOOTER */}
-      <footer className="border-t border-white/5 py-8 text-center text-xs text-[#A0A0B0] space-y-2">
-        <p>© {new Date().getFullYear()} Inside English v2.0. Все права защищены.</p>
-        <p className="text-[10px] font-light">Разработано с заботой о вашей психологической осознанности. 🧘</p>
       </footer>
-
     </div>
+  );
+}
+
+function SectionTitle({ eyebrow, title }: { eyebrow: string; title: string }) {
+  const reduced = useReducedMotion();
+  return (
+    <motion.div
+      initial={reduced ? { opacity: 0 } : { opacity: 0, y: 8 }}
+      whileInView={reduced ? { opacity: 1 } : { opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: "-50px" }}
+      transition={reduced ? reducedMotionTransition : springs.gentle}
+      className="text-center"
+    >
+      <div className="text-[11px] uppercase tracking-[0.25em] text-white/50">{eyebrow}</div>
+      <h2 className="mt-2 text-2xl font-extrabold text-white sm:text-3xl">{title}</h2>
+    </motion.div>
   );
 }

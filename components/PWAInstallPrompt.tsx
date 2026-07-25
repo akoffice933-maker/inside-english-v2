@@ -1,112 +1,157 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Download, X, Share, Plus } from "lucide-react";
+import { springs, reducedMotionTransition } from "@/lib/animations";
 
-/**
- * PWAInstallPrompt Component for Inside English v2.0
- * 
- * Features:
- * 1. Handles modern Chromium browsers (Android, Chrome, Edge) using the 'beforeinstallprompt' hook.
- * 2. Provides elegant contextual instructions for iOS Safari users (Share -> Add to Home Screen),
- *    since iOS does not support automated installation triggers.
- * 3. Designed using the premium Inside dark theme and linear gradient styling.
- */
-export default function PWAInstallPrompt() {
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [isInstallable, setIsInstallable] = useState(false);
-  const [isIOS, setIsIOS] = useState(false);
-  const [isDismissed, setIsDismissed] = useState(false);
+type Platform = "ios" | "android" | "desktop" | "unknown";
+
+function detectPlatform(): Platform {
+  if (typeof window === "undefined") return "unknown";
+  const ua = navigator.userAgent;
+  if (/iPad|iPhone|iPod/.test(ua) && !("MSStream" in window)) return "ios";
+  if (/Android/.test(ua)) return "android";
+  if (/Mac|Windows|Linux/.test(ua)) return "desktop";
+  return "unknown";
+}
+
+type Props = {
+  /** Hide the prompt if the user dismisses it; default: until dismissed */
+  storageKey?: string;
+};
+
+export default function PWAInstallPrompt({ storageKey = "ie_pwa_dismissed_v1" }: Props) {
+  const reduced = useReducedMotion();
+  const [platform, setPlatform] = useState<Platform>("unknown");
+  const [deferredPrompt, setDeferredPrompt] = useState<unknown>(null);
+  const [visible, setVisible] = useState(false);
+  const [showIosHelp, setShowIosHelp] = useState(false);
 
   useEffect(() => {
-    // 1. Detect if the device is iOS (iPhone/iPad)
-    const userAgent = window.navigator.userAgent.toLowerCase();
-    const isIOSDevice = /iphone|ipad|ipod/.test(userAgent);
-    setIsIOS(isIOSDevice);
+    if (typeof window === "undefined") return;
+    if (localStorage.getItem(storageKey) === "1") return;
 
-    // 2. Listen for 'beforeinstallprompt' (Android/Desktop Chrome)
-    const handleBeforeInstallPrompt = (e: Event) => {
-      // Prevent the default browser pop-up banner
+    const p = detectPlatform();
+    setPlatform(p);
+
+    const onBeforeInstall = (e: Event) => {
       e.preventDefault();
-      // Store the event so it can be triggered manually later
       setDeferredPrompt(e);
-      setIsInstallable(true);
+      setVisible(true);
     };
 
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener("beforeinstallprompt", onBeforeInstall);
 
-    // 3. Check if already installed (standalone mode active)
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
-    if (isStandalone) {
-      setIsInstallable(false);
+    // iOS Safari has no event — show a manual hint if accessed on iOS
+    if (p === "ios" && !window.matchMedia("(display-mode: standalone)").matches) {
+      const t = window.setTimeout(() => setVisible(true), 6000);
+      return () => {
+        window.clearTimeout(t);
+        window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+      };
+    }
+
+    // Desktop: prompt after a short delay if installable
+    if (p === "desktop") {
+      const t = window.setTimeout(() => {
+        if ((window as unknown as { __deferredPrompt?: unknown }).__deferredPrompt) {
+          setVisible(true);
+        }
+      }, 8000);
+      return () => {
+        window.clearTimeout(t);
+        window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+      };
     }
 
     return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener("beforeinstallprompt", onBeforeInstall);
     };
-  }, []);
+  }, [storageKey]);
 
-  const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-
-    // Show the native browser installation prompt
-    deferredPrompt.prompt();
-
-    // Wait for the user's decision
-    const { outcome } = await deferredPrompt.userChoice;
-    console.log(`PWA Installation outcome: ${outcome}`);
-
-    // Clear the stored prompt so it can't be used again
-    setDeferredPrompt(null);
-    setIsInstallable(false);
+  const dismiss = () => {
+    setVisible(false);
+    try {
+      localStorage.setItem(storageKey, "1");
+    } catch {
+      /* ignore */
+    }
   };
 
-  if (isDismissed) return null;
-
-  // Render nothing if it's already installed or not supportable
-  if (!isInstallable && !isIOS) return null;
+  const install = async () => {
+    const prompt = deferredPrompt as { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> } | null;
+    if (!prompt) {
+      setShowIosHelp(true);
+      return;
+    }
+    try {
+      await prompt.prompt();
+      await prompt.userChoice;
+    } catch {
+      /* ignore */
+    }
+    setVisible(false);
+  };
 
   return (
-    <div className="fixed bottom-24 left-4 right-4 bg-gradient-to-br from-[#1A1A2E] to-[#0D0D14] border border-[#7B61FF]/30 p-5 rounded-3xl shadow-2xl z-50 flex flex-col space-y-4">
-      
-      {/* Header and Close Button */}
-      <div className="flex justify-between items-start">
-        <div className="flex items-center space-x-3">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#6C3CE1] to-[#E94057] flex items-center justify-center text-xl shadow-lg">
-            🧘
-          </div>
-          <div>
-            <h4 className="text-sm font-bold tracking-tight text-white">Установите Inside English</h4>
-            <p className="text-[11px] text-[#A0A0B0] font-light mt-0.5">Практикуйте язык оффлайн и засыпайте под гипно-треки.</p>
-          </div>
-        </div>
-        <button 
-          onClick={() => setIsDismissed(true)}
-          className="text-xs text-[#A0A0B0] hover:text-white bg-white/5 w-6 h-6 rounded-full flex items-center justify-center transition"
+    <AnimatePresence>
+      {visible && (
+        <motion.div
+          key="pwa"
+          initial={reduced ? { opacity: 0 } : { y: 80, opacity: 0 }}
+          animate={reduced ? { opacity: 1 } : { y: 0, opacity: 1 }}
+          exit={reduced ? { opacity: 0 } : { y: 80, opacity: 0 }}
+          transition={reduced ? reducedMotionTransition : springs.gentle}
+          className="fixed inset-x-3 bottom-24 z-30 sm:bottom-28"
         >
-          ✕
-        </button>
-      </div>
+          <div className="glass-panel-strong mx-auto flex max-w-md items-center gap-3 p-4 shadow-glow-purple">
+            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-[#6C3CE1] to-[#E94057]">
+              {platform === "ios" ? <Share size={18} className="text-white" /> : <Download size={18} className="text-white" />}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-white">
+                Установите Inside English
+              </div>
+              <div className="mt-0.5 text-xs text-white/60">
+                {platform === "ios"
+                  ? "Нажмите «Поделиться» → «На экран Домой»"
+                  : "Слушайте уроки оффлайн, без рекламы"}
+              </div>
+            </div>
+            <button
+              onClick={install}
+              className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-[#0D0D14]"
+            >
+              Установить
+            </button>
+            <button
+              onClick={dismiss}
+              className="grid h-8 w-8 place-items-center rounded-full bg-white/5 text-white/60"
+              aria-label="Close"
+            >
+              <X size={14} />
+            </button>
+          </div>
 
-      {/* Action Buttons based on Platform */}
-      {isIOS ? (
-        // iOS Safari Instructions (No dynamic trigger possible)
-        <div className="bg-white/5 border border-white/5 p-3 rounded-2xl space-y-2 text-xs text-[#A0A0B0] font-light">
-          <p className="font-semibold text-white">Чтобы установить приложение на iPhone:</p>
-          <ol className="list-decimal list-inside space-y-1 text-[11px]">
-            <li>Нажмите на иконку <span className="text-[#7B61FF] font-semibold">«Поделиться»</span> (квадрат со стрелкой вверх) внизу экрана Safari.</li>
-            <li>Прокрутите меню и выберите <span className="text-[#7B61FF] font-semibold">«На экран „Домой“»</span>.</li>
-            <li>Нажмите <span className="text-white font-semibold">«Добавить»</span> в верхнем правом углу.</li>
-          </ol>
-        </div>
-      ) : (
-        // Android / Desktop Chrome Trigger
-        <button
-          onClick={handleInstallClick}
-          className="w-full bg-gradient-to-r from-[#6C3CE1] to-[#E94057] hover:brightness-110 active:scale-[0.98] py-3 rounded-2xl text-xs font-semibold tracking-wider uppercase transition shadow-lg shadow-[#6C3CE1]/20 text-white"
-        >
-          Установить на устройство
-        </button>
+          {showIosHelp && (
+            <motion.div
+              initial={reduced ? { opacity: 0 } : { opacity: 0, y: 8 }}
+              animate={reduced ? { opacity: 1 } : { opacity: 1, y: 0 }}
+              transition={reduced ? reducedMotionTransition : springs.gentle}
+              className="glass-panel mx-auto mt-2 max-w-md p-4 text-sm text-white/80"
+            >
+              <div className="flex items-start gap-2">
+                <Plus size={16} className="mt-0.5 shrink-0 text-[#7B61FF]" />
+                <p>
+                  Откройте <strong>«Поделиться»</strong> внизу экрана Safari и выберите{" "}
+                  <strong>«На экран Домой»</strong>.
+                </p>
+              </div>
+            </motion.div>
+          )}
+        </motion.div>
       )}
-    </div>
+    </AnimatePresence>
   );
 }

@@ -1,370 +1,436 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { usePlayerStore } from '@/stores/usePlayerStore';
-import { TelegramSDK } from '@/lib/telegram';
+import { useEffect, useRef, useState, useMemo } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import {
+  Play,
+  Pause,
+  X,
+  Maximize2,
+  Minimize2,
+  ChevronUp,
+  Repeat,
+  Shuffle,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
+import { usePlayerStore, findActiveTokenIndex } from "@/stores/usePlayerStore";
+import { springs, reducedMotionTransition } from "@/lib/animations";
+import { cn, formatTime } from "@/lib/utils";
+import { TelegramSDK } from "@/lib/telegram";
+import type { TrackToken } from "@/lib/types";
 
-export default function PersistentPlayer() {
+type Props = {
+  tokens: TrackToken[];
+};
+
+export default function PersistentPlayer({ tokens }: Props) {
   const {
-    activeTrack,
-    isPlaying,
-    currentTime,
+    trackId,
+    title,
+    artist,
+    coverGradient,
+    audioUrl,
     duration,
-    playbackRate,
-    languageMode,
-    togglePlay,
+    currentTime,
+    isPlaying,
+    isFullscreen,
+    language,
+    setAudio,
+    play,
+    pause,
     seek,
-    setPlaybackRate,
-    setLanguageMode,
-    shadowingOpen,
-    toggleShadowing,
-    isRecordingShadowing,
-    setRecordingShadowing
+    setCurrentTime,
+    setDuration,
+    setLoading,
+    setFullscreen,
+    setLanguage,
+    togglePlay,
   } = usePlayerStore();
 
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [shadowResult, setShadowResult] = useState<{ score: number; words: any[] } | null>(null);
+  const reduced = useReducedMotion();
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [volume, setVolume] = useState(0.9);
+  const [muted, setMuted] = useState(false);
 
-  // Trigger brief vibration when player expands/collapses
-  const toggleExpand = () => {
-    TelegramSDK.triggerHaptic('light');
-    setIsExpanded(!isExpanded);
-  };
+  // Mount a single audio element and register it with the store.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (audioRef.current) return;
+    const a = new Audio();
+    a.preload = "metadata";
+    a.crossOrigin = "anonymous";
+    audioRef.current = a;
+    setAudio(a);
 
-  // Shadowing Recording trigger
-  const handleShadowingRecord = () => {
-    if (isRecordingShadowing) return;
+    const onTime = () => setCurrentTime(a.currentTime);
+    const onMeta = () => setDuration(a.duration || 0);
+    const onLoad = () => setLoading(false);
+    const onCanPlay = () => setLoading(false);
+    const onWaiting = () => setLoading(true);
+    const onEnded = () => {
+      pause();
+      const id = usePlayerStore.getState().trackId;
+      if (id) {
+        void fetch(`/api/tracks/${id}/progress`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ positionSec: 0, completed: true }),
+        }).catch(() => undefined);
+      }
+    };
 
-    TelegramSDK.triggerHaptic('medium');
-    setRecordingShadowing(true);
-    setShadowResult(null);
+    a.addEventListener("timeupdate", onTime);
+    a.addEventListener("loadedmetadata", onMeta);
+    a.addEventListener("durationchange", onMeta);
+    a.addEventListener("loadstart", onLoad);
+    a.addEventListener("canplay", onCanPlay);
+    a.addEventListener("waiting", onWaiting);
+    a.addEventListener("ended", onEnded);
 
-    // Simulate speech recording and server response
-    setTimeout(() => {
-      setRecordingShadowing(false);
-      TelegramSDK.triggerHaptic('success');
-      setShadowResult({
-        score: 95,
-        words: [
-          { word: 'Today', status: 'match' },
-          { word: 'I', status: 'match' },
-          { word: 'woke', status: 'match' },
-          { word: 'up', status: 'warn' }, // pronounced slightly inaccurately
-          { word: 'early', status: 'match' }
-        ]
-      });
-    }, 4000); // 4 seconds of recording
-  };
+    return () => {
+      a.removeEventListener("timeupdate", onTime);
+      a.removeEventListener("loadedmetadata", onMeta);
+      a.removeEventListener("durationchange", onMeta);
+      a.removeEventListener("loadstart", onLoad);
+      a.removeEventListener("canplay", onCanPlay);
+      a.removeEventListener("waiting", onWaiting);
+      a.removeEventListener("ended", onEnded);
+    };
+  }, [setAudio, setCurrentTime, setDuration, setLoading, pause]);
 
-  if (!activeTrack) return null;
+  // React to source changes
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a || !audioUrl) return;
+    if (a.src !== audioUrl) {
+      a.src = audioUrl;
+      a.load();
+    }
+  }, [audioUrl]);
 
-  // Find active sentence token matching currentTime
-  const activeToken = activeTrack.tokens?.find(
-    (t) => currentTime >= t.start && currentTime <= t.end
+  // Apply volume / mute
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a) return;
+    a.volume = muted ? 0 : volume;
+  }, [volume, muted]);
+
+  const activeIndex = useMemo(
+    () => findActiveTokenIndex(tokens, currentTime),
+    [tokens, currentTime],
   );
+
+  if (!trackId) return null;
+
+  const miniSpring = reduced ? reducedMotionTransition : springs.gentle;
 
   return (
     <>
-      {/* ==========================================
-          1. MINIMIZED FLOATING PLAYER BAR
-          ========================================== */}
-      {!isExpanded && (
-        <div 
-          onClick={toggleExpand}
-          className="fixed bottom-20 left-4 right-4 bg-[#161626]/95 border border-white/5 p-3 rounded-2xl flex items-center justify-between z-40 cursor-pointer shadow-lg hover:bg-[#1A1A2E] transition-all"
-        >
-          <div className="flex items-center space-x-3 min-w-0">
-            <div 
-              className="w-10 h-10 rounded-xl flex-shrink-0"
-              style={{ background: activeTrack.cover_gradient }}
-            />
-            <div className="min-w-0">
-              <h5 className="text-xs font-bold truncate text-white">{activeTrack.title}</h5>
-              <p className="text-[9px] text-[#A0A0B0] mt-0.5 truncate uppercase">
-                {activeTrack.type === 'hypno' ? '🌙 гипно-сессия' : '🧘 mindtrack'}
-              </p>
-            </div>
-          </div>
-
-          {/* Simple Mini play/pause controller */}
-          <button 
-            onClick={(e) => {
-              e.stopPropagation();
-              TelegramSDK.triggerHaptic('light');
-              togglePlay();
-            }}
-            className="w-8 h-8 rounded-full bg-gradient-to-r from-[#6C3CE1] to-[#E94057] flex items-center justify-center text-white text-xs font-bold"
+      {/* MINI BAR */}
+      <AnimatePresence>
+        {!isFullscreen && (
+          <motion.div
+            key="mini"
+            initial={reduced ? { opacity: 0 } : { y: 100, opacity: 0 }}
+            animate={reduced ? { opacity: 1 } : { y: 0, opacity: 1 }}
+            exit={reduced ? { opacity: 0 } : { y: 100, opacity: 0 }}
+            transition={miniSpring}
+            className="fixed inset-x-0 bottom-0 z-40 px-3 pb-[max(env(safe-area-inset-bottom),12px)] pointer-events-none"
           >
-            {isPlaying ? '⏸' : '▶'}
-          </button>
-        </div>
-      )}
-
-      {/* ==========================================
-          2. EXPANDED FULL-SCREEN PLAYER OVERLAY
-          ========================================== */}
-      {isExpanded && (
-        <div className="fixed inset-0 w-full max-w-md mx-auto bg-[#0D0D14] flex flex-col justify-between z-50 overflow-y-auto animate-slide-up pb-safe">
-          
-          {/* Top Navigation Row */}
-          <div className="p-6 flex justify-between items-center border-b border-white/5">
-            <button 
-              onClick={toggleExpand}
-              className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center hover:bg-white/10 text-white/80 transition"
-            >
-              ↓
-            </button>
-            <div className="text-center">
-              <span className="text-[9px] tracking-wider uppercase font-bold text-[#7B61FF] bg-[#7B61FF]/10 px-2.5 py-0.5 rounded-full">
-                {activeTrack.type === 'hypno' ? 'Гипно-сессия' : 'MindTrack'}
-              </span>
-              <h4 className="text-xs font-semibold text-white mt-1 line-clamp-1 max-w-[180px]">{activeTrack.title}</h4>
-            </div>
-            <button 
+            <button
               onClick={() => {
-                TelegramSDK.triggerHaptic('medium');
-                alert('Добавлено в избранное! ♡');
+                setFullscreen(true);
+                TelegramSDK.triggerHaptic("light");
               }}
-              className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center hover:bg-white/10 text-white/80 transition"
+              className="pointer-events-auto mx-auto flex w-full max-w-2xl items-center gap-3 rounded-2xl border border-white/10 bg-[rgba(26,26,46,0.85)] p-3 backdrop-blur-xl shadow-glow-purple"
             >
-              ♡
+              <div
+                className={cn(
+                  "relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-gradient-to-br shadow-glow-purple",
+                  coverGradient,
+                )}
+              >
+                {isPlaying && (
+                  <div className="absolute inset-0 flex items-center justify-center gap-[2px]">
+                    <span className="h-3 w-[2px] animate-pulse bg-white" />
+                    <span className="h-5 w-[2px] animate-pulse bg-white" style={{ animationDelay: "120ms" }} />
+                    <span className="h-2 w-[2px] animate-pulse bg-white" style={{ animationDelay: "240ms" }} />
+                  </div>
+                )}
+              </div>
+
+              <div className="min-w-0 flex-1 text-left">
+                <div className="truncate text-sm font-semibold text-white">{title}</div>
+                <div className="truncate text-xs text-white/60">{artist}</div>
+                <div className="mt-1.5 h-[3px] w-full overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full bg-gradient-to-r from-[#6C3CE1] to-[#E94057] transition-[width] duration-150 ease-linear"
+                    style={{ width: `${(duration ? currentTime / duration : 0) * 100}%` }}
+                  />
+                </div>
+              </div>
+
+              <motion.button
+                whileTap={reduced ? undefined : { scale: 0.92 }}
+                transition={springs.snappy}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  TelegramSDK.triggerHaptic("light");
+                  void togglePlay();
+                }}
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white text-[#0D0D14]"
+                aria-label={isPlaying ? "Pause" : "Play"}
+              >
+                {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="ml-0.5" />}
+              </motion.button>
+
+              <ChevronUp size={18} className="shrink-0 text-white/60" />
             </button>
-          </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-          {/* Core Body - Ambient and lyrics rendering */}
-          <div className="flex-1 px-6 py-12 flex flex-col justify-center relative overflow-hidden">
-            {/* Soft Ambient Background Glow */}
-            <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-25">
-              <div 
-                className="absolute -top-12 -left-12 w-64 h-64 rounded-full blur-3xl"
-                style={{ background: activeTrack.cover_gradient }}
-              />
-              <div className="absolute -bottom-12 -right-12 w-64 h-64 rounded-full blur-3xl bg-[#6C3CE1]/30" />
-            </div>
+      {/* FULL SCREEN */}
+      <AnimatePresence>
+        {isFullscreen && (
+          <motion.div
+            key="full"
+            initial={reduced ? { opacity: 0 } : { y: "100%" }}
+            animate={reduced ? { opacity: 1 } : { y: 0 }}
+            exit={reduced ? { opacity: 0 } : { y: "100%" }}
+            transition={reduced ? reducedMotionTransition : springs.slow}
+            className="fixed inset-0 z-50 overflow-y-auto bg-[#0D0D14]"
+          >
+            <div className={cn("absolute inset-0 bg-gradient-to-br opacity-40", coverGradient)} />
+            <div className="absolute inset-0 bg-[#0D0D14]/70 backdrop-blur-3xl" />
 
-            {/* Display list of lyrics/sentences dynamically */}
-            {activeTrack.tokens && activeTrack.tokens.length > 0 ? (
-              <div className="space-y-6 text-center select-none py-4 relative z-10">
-                {activeTrack.tokens.map((token) => {
-                  const isFuture = currentTime < token.start;
-                  const isActive = currentTime >= token.start && currentTime <= token.end;
-                  const isPast = currentTime > token.end;
+            <div className="relative z-10 flex min-h-full flex-col px-5 pt-6 pb-10 sm:mx-auto sm:max-w-xl">
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => setFullscreen(false)}
+                  className="grid h-10 w-10 place-items-center rounded-full bg-white/5 text-white"
+                  aria-label="Minimize"
+                >
+                  <Minimize2 size={18} />
+                </button>
+                <div className="text-center">
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-white/50">
+                    Now playing
+                  </div>
+                  <div className="text-sm font-medium text-white/80">{artist}</div>
+                </div>
+                <button
+                  onClick={() => usePlayerStore.getState().stop()}
+                  className="grid h-10 w-10 place-items-center rounded-full bg-white/5 text-white"
+                  aria-label="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
 
-                  // Evaluate language mode texts
-                  let text = token.mixed;
-                  if (languageMode === 'russian') text = token.russian;
-                  if (languageMode === 'english') text = token.english;
+              <motion.div
+                layout
+                className={cn(
+                  "mx-auto mt-10 h-64 w-64 shrink-0 rounded-[2rem] bg-gradient-to-br shadow-glow-purple",
+                  coverGradient,
+                )}
+                animate={
+                  reduced
+                    ? {}
+                    : isPlaying
+                      ? { scale: [1, 1.02, 1] }
+                      : { scale: 1 }
+                }
+                transition={reduced ? reducedMotionTransition : { duration: 4, repeat: Infinity, ease: "easeInOut" }}
+              >
+                <div className="grid h-full place-items-center">
+                  <div className="grid h-24 w-24 place-items-center rounded-full bg-white/10 backdrop-blur-md">
+                    <div className="grid h-16 w-16 place-items-center rounded-full bg-white/20">
+                      <Play size={28} className="text-white" fill="currentColor" />
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
 
+              <div className="mt-8 text-center">
+                <h2 className="text-2xl font-bold text-white">{title}</h2>
+                <p className="mt-1 text-sm text-white/60">{artist}</p>
+              </div>
+
+              {/* LYRICS */}
+              <div className="mt-8 max-h-[260px] flex-1 overflow-y-auto pr-1">
+                {tokens.map((t, i) => {
+                  const isPast = currentTime > t.end;
+                  const isActive = i === activeIndex;
+                  const opacity = isActive ? 1 : isPast ? 0.4 : 0.1;
                   return (
-                    <p
-                      key={token.id}
-                      className={`text-lg transition-all duration-300 font-serif leading-relaxed ${
-                        isActive 
-                          ? 'text-white opacity-100 scale-102 font-medium text-glow-purple' 
-                          : isPast 
-                          ? 'text-white/40 opacity-50 font-normal scale-98' 
-                          : 'text-white/10 opacity-20 font-light'
-                      }`}
-                      dangerouslySetInnerHTML={{ __html: text }}
-                    />
+                    <motion.p
+                      key={t.id}
+                      animate={
+                        reduced
+                          ? { opacity, color: isActive ? "#FFFFFF" : "#A0A0B0" }
+                          : {
+                              opacity,
+                              scale: isActive ? 1.02 : 1,
+                              color: isActive ? "#FFFFFF" : "#A0A0B0",
+                            }
+                      }
+                      transition={reduced ? reducedMotionTransition : springs.gentle}
+                      className={cn(
+                        "mb-3 text-lg leading-relaxed",
+                        isActive && "text-glow-purple font-semibold",
+                      )}
+                    >
+                      {renderToken(t, language)}
+                    </motion.p>
                   );
                 })}
               </div>
-            ) : (
-              <p className="text-center text-[#A0A0B0] font-light">Слушайте мягкий голос и расслабляйтесь...</p>
-            )}
 
-            {/* Bottom Shadowing Modal Slider */}
-            {shadowingOpen && (
-              <div className="absolute bottom-4 left-4 right-4 bg-[#161626]/95 border border-[#7B61FF]/30 rounded-3xl p-5 space-y-4 z-55 shadow-2xl animate-fade-in backdrop-blur-md">
-                <div className="flex justify-between items-center">
-                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-[#7B61FF]">Режим Shadowing</h4>
-                  <button 
-                    onClick={toggleShadowing}
-                    className="text-xs text-[#A0A0B0] hover:text-white"
+              {/* PROGRESS */}
+              <div className="mt-6">
+                <input
+                  type="range"
+                  min={0}
+                  max={duration || 0}
+                  step={0.1}
+                  value={Math.min(currentTime, duration || 0)}
+                  onChange={(e) => seek(parseFloat(e.target.value))}
+                  className="audio-progress"
+                />
+                <div className="mt-1 flex justify-between text-xs text-white/50">
+                  <span>{formatTime(currentTime)}</span>
+                  <span>{formatTime(duration)}</span>
+                </div>
+              </div>
+
+              {/* TRANSPORT */}
+              <div className="mt-4 flex items-center justify-between">
+                <motion.button
+                  whileTap={reduced ? undefined : { scale: 0.9 }}
+                  transition={springs.snappy}
+                  onClick={() => setMuted((m) => !m)}
+                  className="grid h-10 w-10 place-items-center rounded-full bg-white/5 text-white/80"
+                  aria-label={muted ? "Unmute" : "Mute"}
+                >
+                  {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                </motion.button>
+                <div className="flex items-center gap-4">
+                  <motion.button
+                    whileTap={reduced ? undefined : { scale: 0.9 }}
+                    transition={springs.snappy}
+                    className="grid h-10 w-10 place-items-center rounded-full bg-white/5 text-white/80"
+                    aria-label="Shuffle"
                   >
-                    Закрыть
-                  </button>
-                </div>
-
-                <div className="text-center space-y-2">
-                  <p className="text-[10px] text-[#A0A0B0]">Повторите за диктором:</p>
-                  <p className="text-xs font-semibold font-serif italic text-white">
-                    "{activeToken ? activeToken.english : 'Today I woke up early.'}"
-                  </p>
-                </div>
-
-                {/* Animated Waveform Visualizer */}
-                <div className="h-12 flex items-center justify-center bg-black/30 rounded-2xl border border-white/5 overflow-hidden">
-                  {isRecordingShadowing ? (
-                    <div className="flex items-center space-x-1">
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 7, 6, 5, 4, 3, 2, 1].map((h, i) => (
-                        <div 
-                          key={i} 
-                          className="w-1 bg-[#E94057] rounded-full animate-pulse" 
-                          style={{ 
-                            height: `${Math.max(4, h * 3 + Math.random() * 6)}px`,
-                            animationDelay: `${i * 0.05}s`
-                          }} 
-                        />
-                      ))}
-                    </div>
-                  ) : shadowResult ? (
-                    <div className="text-center">
-                      <span className="text-xs text-[#4ADE80] font-bold">Оценка: {shadowResult.score}% ✨</span>
-                    </div>
-                  ) : (
-                    <span className="text-[10px] text-[#A0A0B0] font-light">Нажмите на микрофон для записи</span>
-                  )}
-                </div>
-
-                {shadowResult && (
-                  <div className="flex justify-center space-x-1 flex-wrap text-[10px]">
-                    {shadowResult.words.map((w, idx) => (
-                      <span 
-                        key={idx} 
-                        className={`px-1 rounded ${
-                          w.status === 'match' 
-                            ? 'text-[#4ADE80] bg-[#4ADE80]/10 font-semibold' 
-                            : w.status === 'warn' 
-                            ? 'text-yellow-400 bg-yellow-400/10' 
-                            : 'text-red-400 bg-red-400/10'
-                        }`}
-                      >
-                        {w.word}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex justify-center">
-                  <button 
-                    onClick={handleShadowingRecord}
-                    disabled={isRecordingShadowing}
-                    className={`w-12 h-12 rounded-full flex items-center justify-center text-white shadow-lg transition-transform active:scale-95 ${
-                      isRecordingShadowing 
-                        ? 'bg-red-500 animate-pulse' 
-                        : 'bg-gradient-to-r from-[#6C3CE1] to-[#E94057]'
-                    }`}
+                    <Shuffle size={16} />
+                  </motion.button>
+                  <motion.button
+                    whileTap={reduced ? undefined : { scale: 0.9 }}
+                    transition={springs.snappy}
+                    onClick={() => seek(currentTime - 10)}
+                    className="grid h-12 w-12 place-items-center rounded-full bg-white/10 text-white"
+                    aria-label="Back 10s"
                   >
-                    🎤
-                  </button>
+                    <span className="text-xs font-bold">−10</span>
+                  </motion.button>
+                  <motion.button
+                    whileTap={reduced ? undefined : { scale: 0.92 }}
+                    transition={springs.bouncy}
+                    onClick={() => {
+                      TelegramSDK.triggerHaptic("medium");
+                      void togglePlay();
+                    }}
+                    className="grid h-16 w-16 place-items-center rounded-full bg-white text-[#0D0D14] shadow-glow-purple"
+                    aria-label={isPlaying ? "Pause" : "Play"}
+                  >
+                    {isPlaying ? <Pause size={26} fill="currentColor" /> : <Play size={26} fill="currentColor" className="ml-1" />}
+                  </motion.button>
+                  <motion.button
+                    whileTap={reduced ? undefined : { scale: 0.9 }}
+                    transition={springs.snappy}
+                    onClick={() => seek(currentTime + 10)}
+                    className="grid h-12 w-12 place-items-center rounded-full bg-white/10 text-white"
+                    aria-label="Forward 10s"
+                  >
+                    <span className="text-xs font-bold">+10</span>
+                  </motion.button>
+                  <motion.button
+                    whileTap={reduced ? undefined : { scale: 0.9 }}
+                    transition={springs.snappy}
+                    className="grid h-10 w-10 place-items-center rounded-full bg-white/5 text-white/80"
+                    aria-label="Repeat"
+                  >
+                    <Repeat size={16} />
+                  </motion.button>
                 </div>
-              </div>
-            )}
-          </div>
-
-          {/* Bottom Player Controller Panel */}
-          <div className="p-6 bg-[#12121E]/90 backdrop-blur-md border-t border-white/5 space-y-5">
-            
-            {/* Audio Timeline Slider */}
-            <div className="space-y-1">
-              <div className="flex justify-between text-[9px] text-[#A0A0B0] font-light font-mono">
-                <span>{new Date(currentTime * 1000).toISOString().substr(14, 5)}</span>
-                <span>{new Date(duration * 1000).toISOString().substr(14, 5)}</span>
-              </div>
-              <input 
-                type="range"
-                min="0"
-                max={duration || 100}
-                step="0.1"
-                value={currentTime}
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  seek(val);
-                }}
-                className="w-full accent-[#7B61FF] bg-[#1F1F35] h-1 rounded-full cursor-pointer"
-              />
-            </div>
-
-            {/* Actions: Speed, Audio playback, Shadowing button */}
-            <div className="flex justify-between items-center">
-              {/* Playback speed toggle */}
-              <button 
-                onClick={() => {
-                  TelegramSDK.triggerHaptic('light');
-                  const nextRate = playbackRate === 1.0 ? 1.2 : playbackRate === 1.2 ? 1.5 : 1.0;
-                  setPlaybackRate(nextRate);
-                }}
-                className="text-[10px] text-[#A0A0B0] hover:text-white font-mono bg-white/5 px-2.5 py-1 rounded-lg transition"
-              >
-                {playbackRate}x
-              </button>
-
-              {/* Core controls: skip back, play/pause, skip forward */}
-              <div className="flex items-center space-x-6">
-                <button 
-                  onClick={() => {
-                    TelegramSDK.triggerHaptic('light');
-                    seek(currentTime - 10);
-                  }}
-                  className="text-xs text-[#A0A0B0] hover:text-white"
-                >
-                  -10с
-                </button>
-                <button 
-                  onClick={() => {
-                    TelegramSDK.triggerHaptic('medium');
-                    togglePlay();
-                  }}
-                  className="w-14 h-14 rounded-full bg-gradient-to-r from-[#6C3CE1] to-[#E94057] flex items-center justify-center text-white text-xl font-bold shadow-lg shadow-[#6C3CE1]/30 hover:brightness-110 active:scale-95 transition"
-                >
-                  {isPlaying ? '⏸' : '▶'}
-                </button>
-                <button 
-                  onClick={() => {
-                    TelegramSDK.triggerHaptic('light');
-                    seek(currentTime + 10);
-                  }}
-                  className="text-xs text-[#A0A0B0] hover:text-white"
-                >
-                  +10с
-                </button>
+                <div className="w-10" />
               </div>
 
-              {/* Toggle shadowing menu */}
-              {activeTrack.type === 'mindtrack' ? (
-                <button 
-                  onClick={() => {
-                    TelegramSDK.triggerHaptic('light');
-                    toggleShadowing();
-                  }}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center transition ${
-                    shadowingOpen ? 'bg-[#7B61FF] text-white' : 'bg-white/5 text-white/80'
-                  }`}
-                >
-                  🎤
-                </button>
-              ) : (
-                <div className="w-8" />
-              )}
+              {/* LANGUAGE SWITCHER */}
+              <div className="mt-6">
+                <LanguageSwitcher value={language} onChange={setLanguage} />
+              </div>
             </div>
-
-            {/* Language Mode selectors */}
-            <div className="grid grid-cols-3 gap-1 bg-[#1A1A2E]/60 p-1 rounded-xl border border-white/5 text-[10px] font-semibold text-center">
-              {[
-                { id: 'russian', label: 'Русский' },
-                { id: 'mixed', label: 'Смешанный' },
-                { id: 'english', label: 'English Only' }
-              ].map((m) => (
-                <button 
-                  key={m.id}
-                  onClick={() => {
-                    TelegramSDK.triggerHaptic('light');
-                    setLanguageMode(m.id as any);
-                  }}
-                  className={`py-1.5 rounded-lg transition ${
-                    languageMode === m.id ? 'bg-[#7B61FF] text-white shadow' : 'text-[#A0A0B0] hover:text-white'
-                  }`}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
+  );
+}
+
+function renderToken(token: TrackToken, mode: "russian" | "mixed" | "english") {
+  if (mode === "russian") return token.russian;
+  if (mode === "english") return token.english;
+  // mixed: contains inline <span class="text-[#7B61FF] font-medium">…</span>
+  return (
+    <span
+      // The mixed string is authored HTML we control server-side; safe by design.
+      dangerouslySetInnerHTML={{ __html: token.mixed }}
+    />
+  );
+}
+
+function LanguageSwitcher({
+  value,
+  onChange,
+}: {
+  value: "russian" | "mixed" | "english";
+  onChange: (v: "russian" | "mixed" | "english") => void;
+}) {
+  const reduced = useReducedMotion();
+  const opts: { id: "russian" | "mixed" | "english"; label: string }[] = [
+    { id: "russian", label: "RU" },
+    { id: "mixed", label: "RU · EN" },
+    { id: "english", label: "EN" },
+  ];
+  return (
+    <div className="relative grid grid-cols-3 rounded-2xl border border-white/10 bg-white/5 p-1 text-sm">
+      {opts.map((o) => {
+        const active = o.id === value;
+        return (
+          <button
+            key={o.id}
+            onClick={() => {
+              TelegramSDK.triggerHaptic("light");
+              onChange(o.id);
+            }}
+            className={cn(
+              "relative z-10 rounded-xl px-3 py-2 font-medium transition-colors",
+              active ? "text-white" : "text-white/60",
+            )}
+          >
+            {active && (
+              <motion.span
+                layoutId="lang-active"
+                className="absolute inset-0 -z-10 rounded-xl bg-gradient-to-r from-[#6C3CE1] to-[#E94057] shadow-glow-purple"
+                transition={reduced ? reducedMotionTransition : springs.gentle}
+              />
+            )}
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }

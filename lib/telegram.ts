@@ -42,6 +42,12 @@ export class TelegramSDK {
     return null;
   }
 
+  // Detect the underlying client platform (ios | android | macos | web | tdesktop | ...)
+  static getPlatform(): string | null {
+    const webApp = this.getWebApp();
+    return webApp?.platform || null;
+  }
+
   // Ready indicator: signals Telegram that the app has loaded and can render
   static ready() {
     const webApp = this.getWebApp();
@@ -52,7 +58,7 @@ export class TelegramSDK {
   }
 
   // Trigger haptic feedback (vibration) for a premium tactile feel on click
-  static triggerHaptic(type: 'light' | 'medium' | 'heavy' | 'success' | 'warning' | 'error' = 'light') {
+  static triggerHaptic(type: 'light' | 'medium' | 'heavy' | 'soft' | 'rigid' | 'success' | 'warning' | 'error' = 'light') {
     const webApp = this.getWebApp();
     if (webApp && webApp.HapticFeedback) {
       if (['success', 'warning', 'error'].includes(type)) {

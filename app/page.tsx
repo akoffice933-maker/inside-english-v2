@@ -1,231 +1,239 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { usePlayerStore, Track } from '@/stores/usePlayerStore';
-import { registerServiceWorker } from '@/lib/pwa-register';
-import { initializePushNotifications } from '@/lib/notifications';
-import { TelegramSDK } from '@/lib/telegram';
+import { useState, useEffect, useMemo } from "react";
+import { motion } from "framer-motion";
+import { Flame, Sparkles, ArrowRight, BookOpen } from "lucide-react";
+import AppShell from "@/components/AppShell";
+import StateSelector, { type AppState } from "@/components/StateSelector";
+import SectionHeader from "@/components/SectionHeader";
+import RecommendationRail from "@/components/RecommendationRail";
+import PremiumBadge, { PremiumCard } from "@/components/PremiumBadge";
+import InteractiveStudyDemo from "@/components/InteractiveStudyDemo";
+import { TelegramSDK } from "@/lib/telegram";
+import { springs, reducedMotionTransition } from "@/lib/animations";
+import { useReducedMotion } from "framer-motion";
+import { DEMO_TRACKS, DEMO_WORDS } from "@/lib/seed-data";
+import type { Track } from "@/lib/types";
 
-export default function HomePage() {
-  const { setTrack, activeTrack } = usePlayerStore();
-  const [activeState, setActiveState] = useState<'relax' | 'energy' | 'sleep'>('relax');
-  const [recommendations, setRecommendations] = useState<Track[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [username, setUsername] = useState('Алексей');
+export default function DashboardPage() {
+  const reduced = useReducedMotion();
+  const [state, setState] = useState<AppState>("calm");
+  const [isPro, setIsPro] = useState(false);
+  const [tracks, setTracks] = useState<Track[]>([]);
+  const [telegramId, setTelegramId] = useState<string | null>(null);
+  const [streak] = useState(7);
 
-  // Load client features: SW, native Push, Telegram details
+  // Identify the user (Telegram or web).
   useEffect(() => {
-    registerServiceWorker();
-    initializePushNotifications();
-
-    if (TelegramSDK.isTMA()) {
-      TelegramSDK.ready();
-      const tgUser = TelegramSDK.getUser();
-      if (tgUser) {
-        setUsername(tgUser.first_name);
-        TelegramSDK.triggerHaptic('success');
+    const u = TelegramSDK.getUser();
+    if (u) {
+      setTelegramId(String(u.id));
+      const platform = TelegramSDK.getPlatform();
+      if (platform === "ios" || platform === "android" || platform === "macos") {
+        document.body.classList.add("tma");
       }
+    } else {
+      setTelegramId(null);
     }
   }, []);
 
-  // Fetch recommended tracks based on active state (Mood selector)
+  // Poll premium status.
   useEffect(() => {
-    async function fetchRecommendedTracks() {
-      setIsLoading(true);
+    let active = true;
+    const fetchStatus = async () => {
       try {
-        const res = await fetch(`/api/user/recommendations?state=${activeState}&limit=4`);
-        if (res.ok) {
-          const data = await res.json();
-          setRecommendations(data.recommendations || []);
-        } else {
-          throw new Error('API offline');
+        const r = await fetch(`/api/billing/me${telegramId ? `?telegramId=${telegramId}` : ""}`);
+        const j = await r.json();
+        if (active && typeof j.isPremium === "boolean") setIsPro(j.isPremium);
+      } catch {
+        /* ignore */
+      }
+    };
+    void fetchStatus();
+    const id = window.setInterval(fetchStatus, 15_000);
+    return () => {
+      active = false;
+      window.clearInterval(id);
+    };
+  }, [telegramId]);
+
+  // Fetch recommendations per state.
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const r = await fetch(`/api/recommendations?state=${state}${telegramId ? `&telegramId=${telegramId}` : ""}`);
+        const j = await r.json();
+        if (active && Array.isArray(j.tracks)) {
+          setTracks(j.tracks as Track[]);
+        } else if (active) {
+          setTracks(DEMO_TRACKS);
         }
-      } catch (err) {
-        // Safe robust fallback client-side mock list matching seed_data.json
-        console.warn('Recommendation API offline. Triggering static mock data...');
-        const fallbacks: Track[] = [
-          {
-            id: '5f3a02a9-d6e6-4db0-bd91-31427a71a39f',
-            title: activeState === 'energy' ? 'Утреннее солнце (Morning Sun)' : activeState === 'sleep' ? 'Ночной город (Night City)' : 'Прогулка в лесу (Forest Walk)',
-            description: 'Осознанная премиальная аудио-практика для погружения в язык.',
-            type: 'mindtrack',
-            level: 'A1',
-            state: activeState,
-            audio_url: 'https://exdtomovofidksatbeje.supabase.co/storage/v1/object/public/audio/morning_sun.mp3',
-            duration: 270,
-            cover_gradient: activeState === 'sleep' ? 'linear-gradient(135deg, #2B1B4D 0%, #1A1A2E 100%)' : 'linear-gradient(135deg, #6C3CE1 0%, #E94057 100%)',
-            is_premium: false,
-            tokens: []
-          },
-          {
-            id: 'e4b2d56a-12e0-40e1-bb90-0f2c006509a2',
-            title: 'Английский во сне (Sleep Deep)',
-            description: 'Гипно-сессия для плавного засыпания под шепот базовых фраз.',
-            type: 'hypno',
-            level: 'A2',
-            state: 'sleep',
-            audio_url: 'https://exdtomovofidksatbeje.supabase.co/storage/v1/object/public/audio/sleep_deep.mp3',
-            duration: 1500,
-            cover_gradient: 'linear-gradient(135deg, #2B1B4D 0%, #1A1A2E 100%)',
-            is_premium: true,
-            tokens: []
-          }
-        ];
-        // Filter by selected mood state fallback
-        setRecommendations(fallbacks.filter(t => t.state === activeState || t.type === 'hypno' && activeState === 'sleep'));
-      } finally {
-        setIsLoading(false);
+      } catch {
+        if (active) setTracks(DEMO_TRACKS);
+      }
+    };
+    void load();
+    return () => {
+      active = false;
+    };
+  }, [state, telegramId]);
+
+  const tracksByState = useMemo(() => {
+    const map: Record<AppState, Track[]> = {
+      calm: [],
+      focus: [],
+      energy: [],
+      sleep: [],
+    };
+    for (const t of tracks) {
+      const cat = (t.category as AppState) ?? "calm";
+      if (map[cat]) map[cat].push(t);
+    }
+    // Always fall back to demo if the slice is empty.
+    for (const k of Object.keys(map) as AppState[]) {
+      if (map[k].length === 0) {
+        map[k] = DEMO_TRACKS.filter((t) => t.category === k);
       }
     }
-
-    fetchRecommendedTracks();
-  }, [activeState]);
-
-  const handleStateClick = (state: 'relax' | 'energy' | 'sleep') => {
-    setActiveState(state);
-    TelegramSDK.triggerHaptic('light');
-  };
-
-  const handleTrackSelect = (track: Track) => {
-    TelegramSDK.triggerHaptic('medium');
-    setTrack(track); // Opens the global player overlay and starts playback
-  };
+    return map;
+  }, [tracks]);
 
   return (
-    <div className="flex-1 flex flex-col p-6 space-y-6 pb-28">
-      
-      {/* 1. Welcoming Header */}
-      <div className="flex justify-between items-center">
-        <div className="space-y-1">
-          <p className="text-[11px] text-[#A0A0B0] font-light tracking-wider uppercase">Утренняя осознанность</p>
-          <h2 className="text-xl font-bold tracking-tight">С добрым утром, {username} ☀️</h2>
-        </div>
-        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[#6C3CE1] to-[#E94057] p-[1px]">
-          <div className="w-full h-full bg-[#0D0D14] rounded-full flex items-center justify-center font-bold text-xs text-white uppercase">
-            {username.charAt(0)}
+    <AppShell>
+      {/* HERO */}
+      <motion.section
+        initial={reduced ? { opacity: 0 } : { opacity: 0, y: 12 }}
+        animate={reduced ? { opacity: 1 } : { opacity: 1, y: 0 }}
+        transition={reduced ? reducedMotionTransition : springs.gentle}
+        className="glass-panel relative mb-6 overflow-hidden p-5 sm:p-7"
+      >
+        <div className="absolute -right-10 -top-10 h-44 w-44 rounded-full bg-[#6C3CE1] opacity-30 blur-3xl" />
+        <div className="absolute -left-10 -bottom-10 h-36 w-36 rounded-full bg-[#E94057] opacity-25 blur-3xl" />
+        <div className="relative flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.25em] text-white/50">
+              Добро пожаловать
+            </div>
+            <h1 className="mt-1 text-2xl font-bold leading-tight sm:text-3xl">
+              Учите английский в состоянии <span className="text-gradient-primary">потока</span>
+            </h1>
+            <p className="mt-1.5 max-w-sm text-sm text-white/60">
+              Аудиоуроки, теневой анализ произношения и 3D-словарь.
+            </p>
           </div>
+          <PremiumBadge isPro={isPro} onUpgrade={() => TelegramSDK.triggerHaptic("medium")} />
+        </div>
+
+        <div className="relative mt-5 flex items-center gap-2 text-xs text-white/60">
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-[#FF7A5B] to-[#E94057]">
+            <Flame size={14} className="text-white" />
+          </span>
+          <span>
+            <strong className="text-white">{streak}</strong> дней подряд
+          </span>
+        </div>
+      </motion.section>
+
+      {/* STATE SELECTOR */}
+      <section className="mb-7">
+        <SectionHeader title="Выберите состояние" subtitle="Что вы сейчас чувствуете?" />
+        <StateSelector selected={state} onSelect={setState} />
+      </section>
+
+      {/* RECOMMENDATIONS FOR STATE */}
+      <section className="mb-7">
+        <SectionHeader
+          title={stateTitle(state)}
+          subtitle="Подобрано под ваше состояние"
+          action={
+            <button
+              onClick={() => TelegramSDK.triggerHaptic("light")}
+              className="flex items-center gap-1 text-xs font-medium text-white/60"
+            >
+              Все <ArrowRight size={12} />
+            </button>
+          }
+        />
+        <RecommendationRail tracks={tracksByState[state]} isPro={isPro} />
+      </section>
+
+      {/* INTERACTIVE DEMO */}
+      <section className="mb-7">
+        <SectionHeader
+          title="Живая демо-карта слов"
+          subtitle="Потапайте по сферам и пройдите мини-квиз"
+        />
+        <InteractiveStudyDemo words={DEMO_WORDS} />
+      </section>
+
+      {/* PREMIUM UPSELL */}
+      {!isPro && (
+        <section className="mb-7">
+          <PremiumCard onUpgrade={() => TelegramSDK.triggerHaptic("medium")} />
+        </section>
+      )}
+
+      {/* INSIGHT CARDS */}
+      <section className="mb-7 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <InsightCard
+          icon={<BookOpen size={16} className="text-white" />}
+          title="Изучено слов"
+          value="128"
+          hint="за последние 30 дней"
+          gradient="from-[#6C3CE1] to-[#7B61FF]"
+        />
+        <InsightCard
+          icon={<Sparkles size={16} className="text-white" />}
+          title="Shadowing score"
+          value="86%"
+          hint="средний балл"
+          gradient="from-[#E94057] to-[#FF7A5B]"
+        />
+      </section>
+    </AppShell>
+  );
+}
+
+function stateTitle(state: AppState) {
+  switch (state) {
+    case "calm":
+      return "Calm · Спокойствие";
+    case "focus":
+      return "Focus · Концентрация";
+    case "energy":
+      return "Energy · Энергия";
+    case "sleep":
+      return "Sleep · Сон";
+  }
+}
+
+function InsightCard({
+  icon,
+  title,
+  value,
+  hint,
+  gradient,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  value: string;
+  hint: string;
+  gradient: string;
+}) {
+  return (
+    <div className="glass-panel relative overflow-hidden p-4">
+      <div className={`absolute -right-6 -top-6 h-20 w-20 rounded-full bg-gradient-to-br opacity-30 blur-2xl ${gradient}`} />
+      <div className="relative flex items-center gap-2.5">
+        <div className={`grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br ${gradient}`}>
+          {icon}
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.18em] text-white/50">{title}</div>
+          <div className="text-xl font-bold text-white">{value}</div>
         </div>
       </div>
-
-      {/* 2. Primary Hero Recommendation Banner */}
-      <div className="glass-panel p-5 rounded-3xl space-y-4 shadow-lg relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-[#6C3CE1]/15 rounded-full blur-2xl" />
-        <div className="space-y-1.5">
-          <span className="bg-[#FF6B6B]/15 text-[#FF6B6B] text-[10px] px-2.5 py-1 rounded-full uppercase tracking-wider font-semibold">Ваша практика сегодня</span>
-          <h3 className="text-lg font-bold tracking-tight">MindTrack "Путешествия"</h3>
-          <p className="text-xs text-[#A0A0B0] font-light leading-relaxed">Почувствуйте свободу движения и изучите 15 новых фраз.</p>
-        </div>
-        <button 
-          onClick={() => handleTrackSelect({
-            id: '5f3a02a9-d6e6-4db0-bd91-31427a71a39f',
-            title: 'Утреннее солнце (Morning Sun)',
-            description: 'Погружение в язык через состояние расслабления.',
-            type: 'mindtrack',
-            level: 'A1',
-            state: 'energy',
-            audio_url: 'https://exdtomovofidksatbeje.supabase.co/storage/v1/object/public/audio/morning_sun.mp3',
-            duration: 27,
-            cover_gradient: 'linear-gradient(135deg, #6C3CE1 0%, #E94057 100%)',
-            is_premium: false,
-            tokens: [
-              { id: 1, start: 0.0, end: 3.5, russian: "Сегодня я проснулся рано.", english: "Today I woke up early.", mixed: "Сегодня я проснулся <span class='text-[#7B61FF] font-medium'>early</span>." },
-              { id: 2, start: 3.5, end: 7.2, russian: "Солнце светит ярко.", english: "The sun is shining brightly.", mixed: "Солнце <span class='text-[#7B61FF] font-medium'>is shining</span> ярко." },
-              { id: 3, start: 7.2, end: 11.0, russian: "Я чувствую спокойствие и счастье.", english: "I feel calm and happy.", mixed: "Я чувствую <span class='text-[#7B61FF] font-medium'>calm</span> и <span class='text-[#7B61FF] font-medium'>happy</span>." }
-            ]
-          })}
-          className="w-full bg-gradient-to-r from-[#6C3CE1] to-[#E94057] hover:brightness-110 py-3 rounded-2xl text-xs font-bold tracking-wider uppercase transition shadow-lg shadow-[#6C3CE1]/20 text-white"
-        >
-          Запустить сеанс
-        </button>
-      </div>
-
-      {/* 3. State Selector Cards (Relax / Energy / Sleep) */}
-      <div className="space-y-3">
-        <h4 className="text-xs font-bold tracking-wider text-[#A0A0B0] uppercase">Выберите ваше состояние:</h4>
-        <div className="grid grid-cols-3 gap-2.5">
-          {[
-            { id: 'relax', emoji: '🧘', label: 'Расслабиться' },
-            { id: 'energy', emoji: '⚡', label: 'Настроиться' },
-            { id: 'sleep', emoji: '🌙', label: 'Ко сну' }
-          ].map((item) => {
-            const isSelected = activeState === item.id;
-            return (
-              <button 
-                key={item.id} 
-                onClick={() => handleStateClick(item.id as any)}
-                className={`py-3 px-2 rounded-2xl flex flex-col items-center justify-center border transition-all duration-300 ${
-                  isSelected 
-                    ? 'bg-[#6C3CE1]/15 border-[#6C3CE1] text-white scale-102 shadow-md shadow-[#6C3CE1]/5' 
-                    : 'bg-[#1A1A2E]/30 border-white/5 hover:border-white/10 text-[#A0A0B0]'
-                }`}
-              >
-                <span className="text-xl mb-1">{item.emoji}</span>
-                <span className="text-[10px] font-semibold">{item.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* 4. Filtered Recommendations Grid */}
-      <div className="space-y-4 pt-2">
-        <h4 className="text-xs font-bold tracking-wider text-[#A0A0B0] uppercase">Подборка под настроение:</h4>
-        
-        {isLoading ? (
-          <div className="py-8 flex justify-center">
-            <span className="w-6 h-6 border-2 border-[#7B61FF] border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : recommendations.length === 0 ? (
-          <p className="text-xs text-[#A0A0B0] italic text-center py-4">Нет доступных треков для этого настроения.</p>
-        ) : (
-          <div className="grid grid-cols-2 gap-3.5">
-            {recommendations.map((track) => (
-              <div 
-                key={track.id} 
-                onClick={() => handleTrackSelect(track)}
-                className="glass-panel p-3 rounded-2xl flex flex-col space-y-3 cursor-pointer hover:scale-[1.01] transition-transform duration-200"
-              >
-                <div 
-                  className="h-24 w-full rounded-xl relative overflow-hidden"
-                  style={{ background: track.cover_gradient }}
-                >
-                  <span className="absolute top-2 left-2 bg-[#7B61FF] text-[8px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                    {track.level}
-                  </span>
-                  {track.is_premium && (
-                    <span className="absolute top-2 right-2 bg-yellow-500/80 text-[7px] text-[#0D0D14] font-extrabold px-1.5 py-0.5 rounded-md uppercase">
-                      PRO
-                    </span>
-                  )}
-                </div>
-                <div className="space-y-0.5">
-                  <h5 className="font-bold text-xs line-clamp-1">{track.title}</h5>
-                  <p className="text-[9px] text-[#A0A0B0] uppercase tracking-wide">
-                    {track.type === 'hypno' ? '🌙 гипно-сессия' : '🧘 mindtrack'}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Persistent Bottom Tab Bar Overlay (CSS Safe) */}
-      <div className="fixed bottom-0 left-0 right-0 w-full max-w-md mx-auto bg-[#0D0D14]/90 backdrop-blur-md border-t border-white/5 py-4 px-6 flex justify-around items-center z-40 rounded-t-3xl">
-        <button className="flex flex-col items-center space-y-1 text-[#7B61FF]">
-          <span className="text-lg">🏠</span>
-          <span className="text-[9px] font-light">Главная</span>
-        </button>
-        <button className="flex flex-col items-center space-y-1 text-[#A0A0B0] hover:text-white transition">
-          <span className="text-lg">🧘</span>
-          <span className="text-[9px] font-light">Сеансы</span>
-        </button>
-        <button className="flex flex-col items-center space-y-1 text-[#A0A0B0] hover:text-white transition">
-          <span className="text-lg">👤</span>
-          <span className="text-[9px] font-light">Профиль</span>
-        </button>
-      </div>
-
+      <div className="relative mt-2 text-xs text-white/50">{hint}</div>
     </div>
   );
 }

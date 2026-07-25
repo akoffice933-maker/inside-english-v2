@@ -1,161 +1,126 @@
 /**
- * Inside English v2.0 - High Performance Service Worker
- * Features:
- * 1. Pre-caches core app UI shell (HTML, CSS, JS, fonts).
- * 2. Caches regular text-based APIs using Stale-While-Revalidate.
- * 3. Dynamic Audio Caching for offline playback.
- * 4. CRITICAL: Custom HTTP Range Request support for iOS Safari and mobile Chrome 
- *    (standard cache-first strategies fail for media elements because they strictly require 206 Partial Content).
+ * Inside English — Service Worker
+ *
+ * - Caches the app shell on install.
+ * - Network-first for HTML (with cache fallback for offline navigation).
+ * - Cache-first for static assets.
+ * - For .mp3 audio requests, supports HTTP 206 Range requests from cache so
+ *   that offline playback (especially on iOS Safari) works.
  */
 
-const CACHE_NAME = 'inside-english-v2-cache';
-const AUDIO_CACHE_NAME = 'inside-english-audio-cache';
+const CACHE_VERSION = "ie-v1";
+const SHELL_CACHE = `${CACHE_VERSION}-shell`;
+const AUDIO_CACHE = `${CACHE_VERSION}-audio`;
+const ASSET_CACHE = `${CACHE_VERSION}-assets`;
 
-// Core assets to pre-cache on app installation
-const STATIC_ASSETS = [
-  '/',
-  '/manifest.json',
-  '/favicon.ico',
-  // You would list your bundled CSS, JS files, and static fonts/icons here
-];
+const SHELL_URLS = ["/", "/library", "/study", "/profile", "/manifest.webmanifest"];
 
-// 1. INSTALL EVENT
-// Pre-caches all essential structural files
-self.addEventListener('install', (event) => {
+self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      console.log('[Service Worker] Pre-caching Core UI Shell...');
-      return cache.addAll(STATIC_ASSETS);
-    }).then(() => self.skipWaiting())
+    caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL_URLS).catch(() => undefined)),
   );
+  self.skipWaiting();
 });
 
-// 2. ACTIVATE EVENT
-// Clean up legacy caches from prior deploys
-self.addEventListener('activate', (event) => {
+self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cache) => {
-          if (cache !== CACHE_NAME && cache !== AUDIO_CACHE_NAME) {
-            console.log('[Service Worker] Removing old cache:', cache);
-            return caches.delete(cache);
-          }
-        })
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(
+        keys
+          .filter((k) => !k.startsWith(CACHE_VERSION))
+          .map((k) => caches.delete(k)),
       );
-    }).then(() => self.clients.claim())
+      await self.clients.claim();
+    })(),
   );
 });
 
-// 3. FETCH INTERCEPTION & STRATEGIES
-self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
+self.addEventListener("fetch", (event) => {
+  const req = event.request;
+  if (req.method !== "GET") return;
+  const url = new URL(req.url);
 
-  // Check if this is an audio file request (e.g., .mp3 from storage or CDN)
-  const isAudioRequest = 
-    url.pathname.endsWith('.mp3') || 
-    url.pathname.includes('/storage/v1/object/public/audio/') ||
-    event.request.headers.get('Accept')?.includes('audio/');
+  // Range requests for audio — must return 206 Partial Content from cache.
+  if (req.headers.has("range") && url.pathname.endsWith(".mp3")) {
+    event.respondWith(handleRangeAudio(req));
+    return;
+  }
 
-  if (isAudioRequest) {
-    event.respondWith(handleAudioFetch(event.request));
-  } else {
-    // Standard Strategy for UI Assets & Pages: Stale-While-Revalidate
-    event.respondWith(
-      caches.match(event.request).then((cachedResponse) => {
-        const fetchPromise = fetch(event.request).then((networkResponse) => {
-          // Update cache if network response is healthy
-          if (networkResponse.status === 200) {
-            const cacheCopy = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cacheCopy));
-          }
-          return networkResponse;
-        }).catch(() => {
-          // Network failed, serve fallback or offline page if not in cache
-          console.warn('[Service Worker] Network request failed. Serving cached fallback.');
-        });
+  // Audio: cache-first
+  if (url.pathname.endsWith(".mp3") || url.pathname.endsWith(".m4a") || url.pathname.endsWith(".aac")) {
+    event.respondWith(cacheFirst(req, AUDIO_CACHE));
+    return;
+  }
 
-        return cachedResponse || fetchPromise;
-      })
-    );
+  // HTML: network-first with cache fallback
+  if (req.headers.get("accept")?.includes("text/html")) {
+    event.respondWith(networkFirst(req, SHELL_CACHE));
+    return;
+  }
+
+  // Static assets
+  if (
+    url.pathname.startsWith("/_next/static/") ||
+    url.pathname.startsWith("/icons/") ||
+    /\.(svg|png|jpg|jpeg|webp|woff2?)$/.test(url.pathname)
+  ) {
+    event.respondWith(cacheFirst(req, ASSET_CACHE));
+    return;
   }
 });
 
-/**
- * Custom Handler for Audio Fetching.
- * Resolves the iOS/Safari range request bug by slicing cached array buffers
- * and serving correct HTTP 206 Partial Content headers.
- */
-async function handleAudioFetch(request) {
-  const audioCache = await caches.open(AUDIO_CACHE_NAME);
-  const cachedResponse = await audioCache.match(request);
-
-  if (cachedResponse) {
-    console.log('[Service Worker] Audio cache hit! Serving from disk...', request.url);
-    
-    // Check if browser requested partial content (Range Header is required by mobile players)
-    const rangeHeader = request.headers.get('Range');
-    if (rangeHeader) {
-      return returnRangeResponse(cachedResponse, rangeHeader);
-    }
-    return cachedResponse;
-  }
-
-  // Cache miss: Stream from network, cache it for future offline plays, and return response
-  console.log('[Service Worker] Audio cache miss. Downloading track...', request.url);
+async function cacheFirst(req, cacheName) {
+  const cache = await caches.open(cacheName);
+  const cached = await cache.match(req);
+  if (cached) return cached;
   try {
-    const networkResponse = await fetch(request);
-    
-    // Cache the fully downloaded audio track for future offline use (Status 200 or 206)
-    if (networkResponse.status === 200 || networkResponse.status === 206) {
-      const responseToCache = networkResponse.clone();
-      // Store in specific audio cache
-      await audioCache.put(request, responseToCache);
-    }
-
-    return networkResponse;
-  } catch (error) {
-    console.error('[Service Worker] Audio download failed and not cached:', error);
-    // Return standard error response
-    return new Response('Audio unavailable offline', { status: 503, statusText: 'Offline' });
+    const fresh = await fetch(req);
+    if (fresh.ok) cache.put(req, fresh.clone()).catch(() => undefined);
+    return fresh;
+  } catch (err) {
+    return cached || Response.error();
   }
 }
 
-/**
- * Helper to process and serve cached audio responses for HTTP Range requests (HTTP 206).
- */
-async function returnRangeResponse(cachedResponse, rangeHeader) {
-  const arrayBuffer = await cachedResponse.arrayBuffer();
-  const totalLength = arrayBuffer.byteLength;
-  const mimeType = cachedResponse.headers.get('Content-Type') || 'audio/mpeg';
-
-  // Parse Range header (e.g., "bytes=0-100000" or "bytes=25000-")
-  const rangeMatch = rangeHeader.match(/bytes=(\d+)-(\d+)?/);
-  if (!rangeMatch) {
-    return new Response(arrayBuffer, {
-      status: 200,
-      headers: {
-        'Content-Type': mimeType,
-        'Content-Length': totalLength.toString(),
-        'Accept-Ranges': 'bytes',
-      }
-    });
+async function networkFirst(req, cacheName) {
+  const cache = await caches.open(cacheName);
+  try {
+    const fresh = await fetch(req);
+    if (fresh.ok) cache.put(req, fresh.clone()).catch(() => undefined);
+    return fresh;
+  } catch (err) {
+    const cached = await cache.match(req);
+    return cached || cache.match("/");
   }
+}
 
-  const start = parseInt(rangeMatch[1], 10);
-  const end = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : totalLength - 1;
-
-  const slicedBuffer = arrayBuffer.slice(start, end + 1);
-  const slicedLength = slicedBuffer.byteLength;
-
-  return new Response(slicedBuffer, {
-    status: 206,
-    statusText: 'Partial Content',
-    headers: {
-      'Content-Type': mimeType,
-      'Content-Length': slicedLength.toString(),
-      'Content-Range': `bytes ${start}-${end}/${totalLength}`,
-      'Accept-Ranges': 'bytes',
+async function handleRangeAudio(req) {
+  const cache = await caches.open(AUDIO_CACHE);
+  const cached = await cache.match(req.url);
+  if (!cached) {
+    try {
+      return await fetch(req);
+    } catch {
+      return Response.error();
     }
+  }
+  const buffer = await cached.arrayBuffer();
+  const rangeHeader = req.headers.get("range") || "";
+  const match = /bytes=(\d*)-(\d*)/.exec(rangeHeader);
+  if (!match) return new Response(buffer, { status: 200 });
+  const start = match[1] ? parseInt(match[1], 10) : 0;
+  const end = match[2] ? parseInt(match[2], 10) : buffer.byteLength - 1;
+  const slice = buffer.slice(start, end + 1);
+  return new Response(slice, {
+    status: 206,
+    statusText: "Partial Content",
+    headers: [
+      ["Content-Type", cached.headers.get("Content-Type") || "audio/mpeg"],
+      ["Content-Length", String(slice.byteLength)],
+      ["Content-Range", `bytes ${start}-${end}/${buffer.byteLength}`],
+      ["Accept-Ranges", "bytes"],
+      ["Cache-Control", "public, max-age=31536000, immutable"],
+    ],
   });
 }

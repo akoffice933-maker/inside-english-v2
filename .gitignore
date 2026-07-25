@@ -26,6 +26,10 @@ pnpm-debug.log*
 .env.test.local
 .env.production.local
 
+# npm cache / editor scaffolding (was accidentally committed before)
+/.npm/
+/.config/
+
 # vercel
 .vercel
 
