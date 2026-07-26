@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Home, Headphones, BookOpen, User, Sparkles } from "lucide-react";
+import { Home, Headphones, BookOpen, User, Sparkles, Phone } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { springs } from "@/lib/animations";
@@ -10,6 +10,7 @@ import { springs } from "@/lib/animations";
 const TABS = [
   { href: "/", label: "Главная", Icon: Home },
   { href: "/library", label: "Треки", Icon: Headphones },
+  { href: "/bridge", label: "Bridge", Icon: Phone }, // Added Inside Bridge as a core tab! (Fix #3b)
   { href: "/study", label: "Слова", Icon: BookOpen },
   { href: "/profile", label: "Профиль", Icon: User },
 ];
