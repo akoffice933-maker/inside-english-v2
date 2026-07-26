@@ -144,7 +144,10 @@ export default function SubscriptionPage({ onPurchaseSuccess }: { onPurchaseSucc
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ plan: selectedPlan }),
+          body: JSON.stringify({ 
+            plan: selectedPlan,
+            telegramId: tgUser ? String(tgUser.id) : undefined 
+          }),
         });
 
         if (!response.ok) {
