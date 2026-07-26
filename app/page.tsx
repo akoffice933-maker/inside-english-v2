@@ -122,7 +122,10 @@ export default function DashboardPage() {
               Аудиоуроки, теневой анализ произношения и 3D-словарь.
             </p>
           </div>
-          <PremiumBadge isPro={isPro} onUpgrade={() => TelegramSDK.triggerHaptic("medium")} />
+          <PremiumBadge isPro={isPro} onUpgrade={() => {
+            TelegramSDK.triggerHaptic("medium");
+            window.location.href = "/premium";
+          }} />
         </div>
 
         <div className="relative mt-5 flex items-center gap-2 text-xs text-white/60">
@@ -170,7 +173,10 @@ export default function DashboardPage() {
       {/* PREMIUM UPSELL */}
       {!isPro && (
         <section className="mb-7">
-          <PremiumCard onUpgrade={() => TelegramSDK.triggerHaptic("medium")} />
+          <PremiumCard onUpgrade={() => {
+            TelegramSDK.triggerHaptic("medium");
+            window.location.href = "/premium";
+          }} />
         </section>
       )}
 

@@ -1,6 +1,7 @@
 // Supabase Edge Function: revenuecat-webhook (SECURE & COMPREHENSIVE)
 // Written for Deno environment (Deno Deploy).
 // Handles constant-time secret verification and proper TRANSFER event recipient mapping.
+// Resolves Vulnerability #3: Bridges Telegram ID lookup (e.g. "1234567") and Supabase UUID lookup.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
@@ -9,7 +10,7 @@ interface RevenueCatEvent {
   event: {
     id: string;
     type: "INITIAL_PURCHASE" | "RENEWAL" | "CANCELLATION" | "EXPIRATION" | "BILLING_ISSUE" | "PRODUCT_CHANGE" | "TRANSFER";
-    app_user_id: string; // The user associated with the event
+    app_user_id: string; // The user associated with the event (can be Supabase UUID or Telegram ID)
     original_app_user_id?: string; // The source user in case of a TRANSFER event
     product_id: string;
     entitlement_id: string;
@@ -33,7 +34,6 @@ serve(async (req) => {
     });
   }
 
-  // Safe buffer-based timing check inside Deno
   const a = new TextEncoder().encode(authHeader);
   const b = new TextEncoder().encode(expectedAuth);
   
@@ -67,17 +67,34 @@ serve(async (req) => {
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     console.log(`[RevenueCat Webhook] Verified event "${type}" for user: ${app_user_id}`);
 
-    // Helper to update premium settings column for a user
-    const updateUserPremium = async (userId: string, active: boolean) => {
-      // Get user profile first to read settings safely
-      const { data: userProfile, error: fetchError } = await supabaseAdmin
-        .from("users")
-        .select("settings")
-        .eq("id", userId)
-        .single();
+    // Helper to resolve user ID dynamically (UUID vs Telegram ID mapping)
+    const resolveUserRecord = async (identifier: string) => {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+      
+      let query = supabaseAdmin.from("users").select("id, settings");
+      
+      if (isUuid) {
+        query = query.eq("id", identifier);
+      } else {
+        // Look up by Telegram ID (e.g., "1234567") via mock email
+        const mockEmail = `tg_${identifier}@inside-english.telegram`;
+        query = query.eq("email", mockEmail);
+      }
 
-      if (fetchError || !userProfile) {
-        console.warn(`[RevenueCat Webhook] User ${userId} profile not found in database.`);
+      const { data, error } = await query.maybeSingle();
+      if (error) {
+        console.error(`[RevenueCat Webhook] Error resolving user profile ${identifier}:`, error);
+        return null;
+      }
+      return data;
+    };
+
+    // Helper to update premium settings column for a user
+    const updateUserPremium = async (userIdentity: string, active: boolean) => {
+      const userProfile = await resolveUserRecord(userIdentity);
+
+      if (!userProfile) {
+        console.warn(`[RevenueCat Webhook] User ${userIdentity} profile not found in database.`);
         return false;
       }
 
@@ -90,10 +107,10 @@ serve(async (req) => {
       const { error: updateError } = await supabaseAdmin
         .from("users")
         .update({ settings: updatedSettings })
-        .eq("id", userId);
+        .eq("id", userProfile.id);
 
       if (updateError) {
-        console.error(`[RevenueCat Webhook] Database update failed for user ${userId}:`, updateError);
+        console.error(`[RevenueCat Webhook] Database update failed for user ${userProfile.id}:`, updateError);
         return false;
       }
       return true;
@@ -101,8 +118,6 @@ serve(async (req) => {
 
     // 2. Handle events including complex TRANSFER events (Fixes Vulnerability #7)
     if (type === "TRANSFER") {
-      // A transfer event means entitlements moved from original_app_user_id to app_user_id
-      // We MUST deactivate premium for original_app_user_id AND activate it for app_user_id
       let originalSuccess = true;
       if (original_app_user_id) {
         console.log(`[RevenueCat Webhook] Deactivating transferred premium from original user: ${original_app_user_id}`);

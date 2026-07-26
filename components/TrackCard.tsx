@@ -28,7 +28,7 @@ export default function TrackCard({ track, isPro = false }: Props) {
     e.stopPropagation();
     if (locked) {
       TelegramSDK.triggerHaptic("soft");
-      window.location.href = "/#pricing";
+      window.location.href = "/premium";
       return;
     }
     TelegramSDK.triggerHaptic("medium");
