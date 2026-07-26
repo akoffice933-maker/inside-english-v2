@@ -4,12 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { TelegramSDK } from '@/lib/telegram';
 import { createClient } from '@supabase/supabase-js';
 
-// Setup client-safe Supabase connection
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-// Safe Dyanmic import for RevenueCat Purchases SDK on native platforms
+// Safe Dynamic import for RevenueCat Purchases SDK on native platforms
 let Purchases: any = null;
 if (typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform()) {
   try {
@@ -37,9 +32,18 @@ export default function SubscriptionPage({ onPurchaseSuccess }: { onPurchaseSucc
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isTelegramMiniApp, setIsTelegramMiniApp] = useState(false);
 
+  // Safe lazy loader for Client-side Supabase connection (Fixes Eager-init crash vulnerability)
+  const getSupabaseClient = () => {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return null;
+    }
+    return createClient(supabaseUrl, supabaseAnonKey);
+  };
+
   // Load and configure Billing channels on mount
   useEffect(() => {
-    // Determine platform layout
     const isTMA = TelegramSDK.isTMA();
     setIsTelegramMiniApp(isTMA);
 
@@ -52,7 +56,7 @@ export default function SubscriptionPage({ onPurchaseSuccess }: { onPurchaseSucc
           product: {
             title: isTMA ? 'Inside Premium Monthly' : 'Inside English Monthly',
             description: 'Доступ ко всем практикам помесячно',
-            priceString: isTMA ? '150 🌟' : '$9.99', // Uses Telegram Stars inside Telegram! (Fix #5b)
+            priceString: isTMA ? '150 🌟' : '$9.99', // Uses Telegram Stars inside Telegram!
             price: isTMA ? 150 : 9.99
           }
         },
@@ -90,9 +94,12 @@ export default function SubscriptionPage({ onPurchaseSuccess }: { onPurchaseSucc
         if (tgUser) {
           appUserID = String(tgUser.id);
         } else {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user) {
-            appUserID = user.id;
+          const supabaseClient = getSupabaseClient();
+          if (supabaseClient) {
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            if (user) {
+              appUserID = user.id;
+            }
           }
         }
 
@@ -121,30 +128,57 @@ export default function SubscriptionPage({ onPurchaseSuccess }: { onPurchaseSucc
     setIsLoading(true);
     setErrorMessage(null);
 
-    // Scenario A: Telegram Stars Billing inside Telegram (Fix #5b)
+    // Scenario A: Real Telegram Stars Billing inside Telegram (Fix #5b / Блокер #2)
     if (isTelegramMiniApp) {
       try {
         const tgUser = TelegramSDK.getUser();
         if (!tgUser) {
-          setErrorMessage('Ошибка авторизации Telegram.');
+          setErrorMessage('Ошибка авторизации Telegram. Перезапустите бота.');
           setIsLoading(false);
           return;
         }
 
-        const priceStars = selectedPlan === 'annual' ? 750 : 150;
-        console.log(`[Telegram Stars] Initiating checkout for ${priceStars} stars...`);
+        // 1. Fetch real Invoice link from our server API Route
+        const response = await fetch('/api/billing/create-invoice-link', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ plan: selectedPlan }),
+        });
 
-        // Simulate Telegram Stars invoice link generation from backend Bot API
-        setTimeout(() => {
-          setIsLoading(false);
-          // In production, you would fetch real invoiceLink from /api/billing/create-invoice-link
-          // and run TelegramSDK.getWebApp().openInvoice(invoiceLink, (status) => ...)
-          alert(`[Имитация Telegram Stars] Вы успешно оплатили ${priceStars} 🌟! Доступ Inside Premium активирован.`);
-          if (onPurchaseSuccess) onPurchaseSuccess();
-        }, 1500);
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData?.error || 'Failed to generate invoice link');
+        }
+
+        const { invoiceLink } = await response.json();
+
+        // 2. Invoke Telegram WebApp Native Stars checkout overlay
+        const webApp = TelegramSDK.getWebApp();
+        if (webApp && webApp.openInvoice) {
+          console.log('[Telegram Stars] Opening native payment invoice link...');
+          webApp.openInvoice(invoiceLink, (status: 'paid' | 'cancelled' | 'failed') => {
+            setIsLoading(false);
+            if (status === 'paid') {
+              alert('Спасибо за покупку! Подписка Inside Premium успешно активирована 🎉.');
+              if (onPurchaseSuccess) onPurchaseSuccess();
+            } else {
+              setErrorMessage('Платеж отменен или произошла ошибка при оплате.');
+            }
+          });
+        } else {
+          // Web preview simulation if running inside a browser simulating TMA
+          setTimeout(() => {
+            setIsLoading(false);
+            alert(`[Имитация Telegram Stars] Вы успешно оплатили подписку! Доступ Inside Premium активирован.`);
+            if (onPurchaseSuccess) onPurchaseSuccess();
+          }, 1500);
+        }
         return;
       } catch (e: any) {
-        setErrorMessage('Ошибка проведения платежа Telegram Stars.');
+        console.error('Telegram Stars Checkout Failed:', e);
+        setErrorMessage(e.message || 'Ошибка проведения платежа Telegram Stars.');
         setIsLoading(false);
         return;
       }

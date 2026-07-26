@@ -1,0 +1,86 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createSupabaseRouteClient } from '@/lib/supabase';
+
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+
+/**
+ * POST /api/billing/create-invoice-link
+ * 
+ * Generates a real Telegram Stars payment invoice link using Telegram Bot API.
+ * Access: Authenticated users (Web Session or verified Telegram InitData).
+ */
+export async function POST(request: NextRequest) {
+  try {
+    const { plan } = await request.json();
+
+    if (plan !== 'monthly' && plan !== 'annual') {
+      return NextResponse.json({ error: 'Invalid subscription plan.' }, { status: 400 });
+    }
+
+    // 1. Authenticate user
+    const supabase = createSupabaseRouteClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized. Sign in first.' }, { status: 401 });
+    }
+
+    // Ensure Bot Token is configured on the host server
+    if (!TELEGRAM_BOT_TOKEN) {
+      console.error('[Telegram Stars Error] TELEGRAM_BOT_TOKEN is not configured.');
+      return NextResponse.json({ error: 'Telegram payment billing service unavailable.' }, { status: 503 });
+    }
+
+    // Fetch user's Telegram ID from metadata to link the transaction
+    const telegramId = user.user_metadata?.telegram_id;
+    if (!telegramId) {
+      return NextResponse.json({ error: 'Your account is not linked to a Telegram profile.' }, { status: 400 });
+    }
+
+    const priceAmount = plan === 'annual' ? 750 : 150; // Pricing matched to 150 / 750 Stars
+
+    // 2. Call Telegram Bot API: createInvoiceLink
+    // Official Docs: https://core.telegram.org/bots/api#createinvoicelink
+    console.log(`[Telegram Stars API] Generating invoice for Telegram ID ${telegramId}. Plan: ${plan}`);
+    
+    const tgInvoicePayload = {
+      title: plan === 'annual' ? 'Inside English Premium (1 Год)' : 'Inside English Premium (1 Месяц)',
+      description: 'Безлимитный доступ ко всем MindTracks, ГипноТрекам, ИИ-Shadowing и оффлайн-кэшированию.',
+      payload: `sub_${plan}_user_${user.id}`, // Payload returned in pre_checkout_query webhook
+      provider_token: '', // Must be empty for Telegram Stars
+      currency: 'XTR', // Telegram Stars currency code
+      prices: [
+        { label: 'Inside Premium Access', amount: priceAmount }
+      ]
+    };
+
+    const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/createInvoiceLink`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(tgInvoicePayload),
+    });
+
+    if (!response.ok) {
+      const errDetails = await response.text();
+      console.error(`[Telegram Stars API] Call failed:`, errDetails);
+      return NextResponse.json({ error: 'Failed to generate Telegram Stars invoice.' }, { status: 502 });
+    }
+
+    const resData = await response.json();
+    if (!resData.ok || !resData.result) {
+      return NextResponse.json({ error: 'Invalid response from Telegram Bot API.' }, { status: 502 });
+    }
+
+    // Return the generated invoice link to the client
+    return NextResponse.json({
+      success: true,
+      invoiceLink: resData.result
+    }, { status: 200 });
+
+  } catch (err: any) {
+    console.error('Telegram Stars Invoice Route exception:', err);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
