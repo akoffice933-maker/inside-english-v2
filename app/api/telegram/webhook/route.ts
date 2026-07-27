@@ -1,19 +1,43 @@
+import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_WEBHOOK_SECRET_TOKEN = process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN || '';
 
 /**
  * POST /api/telegram/webhook
  * 
  * Official Webhook Handler for the Telegram Bot API.
  * 
- * Crucial for Telegram Stars Billing Lifecycle (Fixes Blocker #2):
- * 1. pre_checkout_query: Automatically answers with ok: true within 10s to approve the payment.
- * 2. successful_payment: Captures the receipt and updates users.settings.is_premium = true in Postgres.
+ * Fixes Critical Vulnerability (Bot Webhook Backdoor):
+ * Securely authenticates every incoming webhook request from Telegram using 
+ * the 'X-Telegram-Bot-Api-Secret-Token' header and constant-time string comparison (timingSafeEqual).
+ * Prevents unauthorized attackers from spoofing successful_payment payloads.
  */
 export async function POST(request: NextRequest) {
   try {
+    // 1. Verify Telegram Webhook Secret Token (MANDATORY SECURITY LAYER)
+    // Official Docs: https://core.telegram.org/bots/api#setwebhook
+    const receivedToken = request.headers.get('x-telegram-bot-api-secret-token') || '';
+
+    if (!TELEGRAM_WEBHOOK_SECRET_TOKEN) {
+      console.error('[Telegram Webhook Error] TELEGRAM_WEBHOOK_SECRET_TOKEN is not configured in environmental settings.');
+      return NextResponse.json({ error: 'Webhook billing configuration error.' }, { status: 500 });
+    }
+
+    const bufferExpected = Buffer.from(TELEGRAM_WEBHOOK_SECRET_TOKEN, 'utf8');
+    const bufferReceived = Buffer.from(receivedToken, 'utf8');
+
+    // Constant-time check prevents timing-attacks and checks buffer length
+    const isTokenValid = bufferExpected.length === bufferReceived.length && 
+                         crypto.timingSafeEqual(bufferExpected, bufferReceived);
+
+    if (!isTokenValid) {
+      console.warn('[Telegram Webhook Security Alert] Blocked unauthorized POST request attempting to access webhook.');
+      return NextResponse.json({ error: 'Unauthorized. Invalid webhook token.' }, { status: 401 });
+    }
+
     const update = await request.json();
 
     // Ensure Bot Token is configured on the host server
@@ -30,7 +54,6 @@ export async function POST(request: NextRequest) {
       console.log(`[Telegram Webhook] Received pre_checkout_query. Approving transaction ID: ${preCheckoutQueryId}`);
 
       // answerPreCheckoutQuery: Approves the payment and allows Telegram to process charge (MANDATORY)
-      // Official Docs: https://core.telegram.org/bots/api#answerprecheckoutquery
       const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerPreCheckoutQuery`, {
         method: 'POST',
         headers: {
@@ -62,7 +85,6 @@ export async function POST(request: NextRequest) {
       console.log(`[Telegram Webhook] Payment successful! Payload received: "${invoicePayload}"`);
 
       // Extract the Supabase user UUID from the payload
-      // Payload format: "sub_monthly_user_UUID" or "sub_annual_user_UUID"
       const payloadMatch = invoicePayload.match(/user_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
       
       if (!payloadMatch) {
@@ -109,7 +131,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, status: 'premium_activated' }, { status: 200 });
     }
 
-    // Default catch-all response for other bot webhook updates (e.g. standard messages)
+    // Default catch-all response for other bot webhook updates
     return NextResponse.json({ success: true, status: 'ignored_update_type' }, { status: 200 });
 
   } catch (err: any) {
