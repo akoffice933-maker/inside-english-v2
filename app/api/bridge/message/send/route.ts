@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
 
     const supabaseAdmin = createSupabaseServiceClient();
 
-    // 2. Query session state and variables
+    // 2. Query session state & check premium status (Fix Blocker #2)
     const { data: session, error: sessionError } = await supabaseAdmin
       .from('bridge_sessions')
       .select('state, creator_id')
@@ -37,6 +37,20 @@ export async function POST(request: NextRequest) {
 
     if (sessionError || !session) {
       return NextResponse.json({ error: 'Сессия диалога не найдена.' }, { status: 404 });
+    }
+
+    // Fetch user settings securely via service role to check subscription status
+    const { data: userProfile } = await supabaseAdmin
+      .from('users')
+      .select('settings')
+      .eq('id', session.creator_id)
+      .maybeSingle();
+
+    const isPremiumUser = userProfile?.settings?.is_premium === true;
+    if (!isPremiumUser && process.env.NODE_ENV === 'production') {
+      return NextResponse.json({ 
+        error: 'Premium subscription required to use Inside Bridge translation.' 
+      }, { status: 402 });
     }
 
     // 3. Request OpenAI GPT-4o with strict JSON structured output

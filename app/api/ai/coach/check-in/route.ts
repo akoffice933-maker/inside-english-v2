@@ -10,6 +10,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
  * Securely processes the user's emotional mood check-in.
  * Returns a personalized meditation intro and custom affirmation tokens for the player.
  * Supports both Web PWA and Telegram Mini App sessions.
+ * 
+ * Fixes Blocker #2: Strictly gates access behind active is_premium subscription in production!
  */
 export async function POST(request: NextRequest) {
   try {
@@ -28,22 +30,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Необходимо передать текущее состояние и описание настроения.' }, { status: 400 });
     }
 
-    // 2. Resolve User ID (Dual-Identity Bridge)
+    // 2. Resolve User ID and Settings (Dual-Identity Bridge)
     let userId: string | null = null;
+    let userSettings: any = null;
     let supabaseClient;
 
     if (telegramId) {
       supabaseClient = createSupabaseServiceClient();
       const { data: profile } = await supabaseClient
         .from('users')
-        .select('id')
+        .select('id, settings')
         .eq('email', telegramMockEmail(telegramId))
         .maybeSingle();
       userId = profile?.id || null;
+      userSettings = profile?.settings || null;
     } else {
       const supabase = createSupabaseRouteClient();
       const { data: { user } } = await supabase.auth.getUser();
-      userId = user?.id || null;
+      if (user) {
+        userId = user.id;
+        const adminClient = createSupabaseServiceClient();
+        const { data: profile } = await adminClient
+          .from('users')
+          .select('settings')
+          .eq('id', user.id)
+          .maybeSingle();
+        userSettings = profile?.settings || null;
+      }
     }
 
     // Fallback: If no authenticated user is found, reject in production,
@@ -52,7 +65,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized. Please sign in.' }, { status: 401 });
     }
 
-    // 3. OpenAI GPT-4o Call or High-Fidelity Local Mock Fallback
+    // 3. Fix Blocker #2: Strict Premium Gate for high-cost GPT-4o AI Coach checkin
+    const isPremiumUser = userSettings?.is_premium === true;
+    if (!isPremiumUser && process.env.NODE_ENV === 'production') {
+      return NextResponse.json({ 
+        error: 'Premium subscription required to access the ИИ-Коуч. Пожалуйста, оформите подписку.' 
+      }, { status: 402 });
+    }
+
+    // 4. OpenAI GPT-4o Call or High-Fidelity Local Mock Fallback
     let gptContent;
 
     if (OPENAI_API_KEY) {
@@ -116,11 +137,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Ошибка генерации контента нейросетью.' }, { status: 502 });
       }
     } else {
-      // Mock Fallback: Perfect for Staging, local dev, or static GitHub Pages previewing
-      if (process.env.NODE_ENV === 'production') {
-        return NextResponse.json({ error: 'Speech engine misconfigured.' }, { status: 500 });
-      }
-
+      // Mock Fallback (permitted only in local DEVELOPMENT / STAGING)
       console.warn('[AI Mood Coach] Missing OpenAI API Key. Firing rich local fallback.');
       
       if (state === 'relax' || state === 'sleep') {
@@ -131,7 +148,6 @@ export async function POST(request: NextRequest) {
             {
               id: 1,
               start: 0.0,
-              // Matched to the first 4.5s of morning_calm.mp3 / sleep_stories.mp3
               end: 4.0,
               russian: "Я отпускаю все напряжение,",
               english: "I let go of tension,",
@@ -173,7 +189,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 4. Save the generated session to Supabase database (Bypasses RLS safely via service client)
+    // 5. Save the generated session to Supabase database (Bypasses RLS safely via service client)
     if (userId) {
       try {
         const supabaseAdmin = createSupabaseServiceClient();
@@ -199,6 +215,6 @@ export async function POST(request: NextRequest) {
 
   } catch (err: any) {
     console.error('AI Coach endpoint global exception:', err);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ error: 'Внутренняя ошибка сервера' }, { status: 500 });
   }
 }
