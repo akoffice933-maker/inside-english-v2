@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseRouteClient, createSupabaseServiceClient, telegramMockEmail } from '@/lib/supabase';
 import { isRateLimited, getClientIP } from '@/lib/rate-limit';
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+import { requestOpenRouter } from '@/lib/openrouter';
 
 /**
  * POST /api/ai/coach/check-in
@@ -12,6 +11,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
  * Supports both Web PWA and Telegram Mini App sessions.
  * 
  * Fixes Blocker #2: Strictly gates access behind active is_premium subscription in production!
+ * Integrates: OpenRouter API aggregator for unified, cost-effective LLM processing.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -59,13 +59,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Fallback: If no authenticated user is found, reject in production,
-    // but allow mock previews in development/GitHub Pages static demos.
+    // Fallback: If no authenticated user is found, reject in production
     if (!userId && process.env.NODE_ENV === 'production') {
       return NextResponse.json({ error: 'Unauthorized. Please sign in.' }, { status: 401 });
     }
 
-    // 3. Fix Blocker #2: Strict Premium Gate for high-cost GPT-4o AI Coach checkin
+    // 3. Strict Premium Gate for high-cost AI Coach checkin
     const isPremiumUser = userSettings?.is_premium === true;
     if (!isPremiumUser && process.env.NODE_ENV === 'production') {
       return NextResponse.json({ 
@@ -73,72 +72,55 @@ export async function POST(request: NextRequest) {
       }, { status: 402 });
     }
 
-    // 4. OpenAI GPT-4o Call or High-Fidelity Local Mock Fallback
+    // 4. OpenRouter Call or High-Fidelity Local Mock Fallback
     let gptContent;
+    const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 
-    if (OPENAI_API_KEY) {
+    if (OPENROUTER_API_KEY) {
       try {
-        console.log(`[AI Mood Coach] Generating personalized session. Mood: ${moodInput.substring(0, 30)}...`);
-
-        const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${OPENAI_API_KEY}`
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o',
-            response_format: { type: 'json_object' },
-            messages: [
-              {
-                role: 'system',
-                content: `Вы — премиальный ИИ-коуч состояния и преподаватель английского языка в приложении Inside English. 
-                Проанализируйте чек-ин пользователя, его состояние (${state}) и сгенерируйте ответ строго в формате JSON:
+        const messages = [
+          {
+            role: 'system' as const,
+            content: `Вы — премиальный ИИ-коуч состояния и преподаватель английского языка в приложении Inside English. 
+            Проанализируйте чек-ин пользователя, его состояние (${state}) и сгенерируйте ответ строго в формате JSON:
+            {
+              "introText": "Мягкий вводный текст (до 35 слов) на русском языке с редкими вкраплениями английского. Текст настраивает на практику.",
+              "affirmation": "Глубокая аффирмация (1 предложение) на английском языке.",
+              "affirmationTokens": [
                 {
-                  "introText": "Мягкий вводный текст (до 35 слов) на русском языке с редкими вкраплениями английского. Текст настраивает на практику.",
-                  "affirmation": "Глубокая аффирмация (1 предложение) на английском языке.",
-                  "affirmationTokens": [
-                    {
-                      "id": 1,
-                      "start": 0.0,
-                      "end": 4.5,
-                      "russian": "Перевод первой части аффирмации.",
-                      "english": "Английская первая часть.",
-                      "mixed": "Смешанный вариант с выделением английских слов через <span class=\\"text-[#7B61FF] font-medium\\">...</span>"
-                    },
-                    {
-                      "id": 2,
-                      "start": 4.5,
-                      "end": 9.0,
-                      "russian": "Перевод второй части аффирмации.",
-                      "english": "Английская вторая часть.",
-                      "mixed": "Смешанный вариант второй части."
-                    }
-                  ]
-                }`
-              },
-              {
-                role: 'user',
-                content: `Мое состояние: ${state}. Мое самочувствие сейчас: "${moodInput}"`
-              }
-            ]
-          })
-        });
+                  "id": 1,
+                  "start": 0.0,
+                  "end": 4.5,
+                  "russian": "Перевод первой части аффирмации.",
+                  "english": "Английская первая часть.",
+                  "mixed": "Смешанный вариант с выделением английских слов через <span class=\\"text-[#7B61FF] font-medium\\">...</span>"
+                },
+                {
+                  "id": 2,
+                  "start": 4.5,
+                  "end": 9.0,
+                  "russian": "Перевод второй части аффирмации.",
+                  "english": "Английская вторая часть.",
+                  "mixed": "Смешанный вариант второй части."
+                }
+              ]
+            }`
+          },
+          {
+            role: 'user' as const,
+            content: `Мое состояние: ${state}. Мое самочувствие сейчас: "${moodInput}"`
+          }
+        ];
 
-        if (!openaiResponse.ok) {
-          const errText = await openaiResponse.text();
-          throw new Error(`OpenAI error: ${errText}`);
-        }
-
-        const openaiData = await openaiResponse.json();
-        gptContent = JSON.parse(openaiData.choices[0].message.content);
+        const openrouterData = await requestOpenRouter(messages, true);
+        gptContent = JSON.parse(openrouterData.choices[0].message.content);
       } catch (err: any) {
-        console.error('[OpenAI API Error] Failed to generate coaching content:', err);
+        console.error('[OpenRouter API Error] Failed to generate coaching content:', err);
         return NextResponse.json({ error: 'Ошибка генерации контента нейросетью.' }, { status: 502 });
       }
     } else {
       // Mock Fallback (permitted only in local DEVELOPMENT / STAGING)
-      console.warn('[AI Mood Coach] Missing OpenAI API Key. Firing rich local fallback.');
+      console.warn('[AI Mood Coach] Missing OpenRouter API Key. Firing rich local fallback.');
       
       if (state === 'relax' || state === 'sleep') {
         gptContent = {

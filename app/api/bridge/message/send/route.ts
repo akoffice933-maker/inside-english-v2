@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServiceClient, telegramMockEmail } from '@/lib/supabase';
+import { createSupabaseServiceClient } from '@/lib/supabase';
 import { isRateLimited, getClientIP } from '@/lib/rate-limit';
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+import { requestOpenRouter } from '@/lib/openrouter';
 
 /**
  * POST /api/bridge/message/send
@@ -10,6 +9,9 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
  * Securely processes a conversational message within the Inside Bridge (Flow Talk) ecosystem.
  * Evaluates literal meaning, speaker's emotional intent, and generates 3 custom response paths
  * based on the active session's emotional state (relax/energy).
+ * 
+ * Fixes Blocker #2: Strictly gates access behind active is_premium subscription in production!
+ * Integrates: OpenRouter API aggregator for unified, cost-effective LLM processing.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -53,14 +55,16 @@ export async function POST(request: NextRequest) {
       }, { status: 402 });
     }
 
-    // 3. Request OpenAI GPT-4o with strict JSON structured output
-    if (!OPENAI_API_KEY) {
+    // 3. Request OpenRouter with strict JSON structured output
+    const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
+
+    if (!OPENROUTER_API_KEY) {
       // Mock Fallback for local development or static demo previewing (prevents crashing when API keys are absent)
       if (process.env.NODE_ENV === 'production') {
         return NextResponse.json({ error: 'ИИ-посредник временно отключен.' }, { status: 503 });
       }
 
-      console.warn('[Inside Bridge] Missing OpenAI API Key. Operating in mock fallback conversational mode.');
+      console.warn('[Inside Bridge] Missing OpenRouter API Key. Operating in mock fallback conversational mode.');
       
       const isEnglish = languageCode.toLowerCase() === 'en';
       const mockPayload = {
@@ -102,70 +106,60 @@ export async function POST(request: NextRequest) {
 
     console.log(`[Inside Bridge] Evaluating message for session ${sessionId}. Language: ${languageCode}`);
 
-    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`
+    const messages = [
+      {
+        role: 'system' as const,
+        content: `Вы — умный голосовой ИИ-посредник Inside Bridge. Проанализируйте реплику в контексте состояния сессии (${session.state}).
+        Верните строго JSON-объект:
+        {
+          "literalTranslation": "Перевод реплики на противоположный язык (RU <-> EN).",
+          "intent": "Краткое намерение говорящего (например: Мягкий отказ, Уточнение).",
+          "emotion": "Эмоциональный тон (например: Неуверенность, Спокойствие, Спешка).",
+          "suggestedReplies": [
+            { "id": 1, "text": "Вариант ответа 1.", "type": "answer", "description": "Пояснение." },
+            { "id": 2, "text": "Вариант ответа 2.", "type": "question", "description": "Пояснение." },
+            { "id": 3, "text": "Вариант ответа 3.", "type": "topic_change", "description": "Пояснение." }
+          ]
+        }`
       },
-      body: JSON.stringify({
-        model: 'gpt-4o',
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: `Вы — умный голосовой ИИ-посредник Inside Bridge. Проанализируйте реплику в контексте состояния сессии (${session.state}).
-            Верните строго JSON-объект:
-            {
-              "literalTranslation": "Перевод реплики на противоположный язык (RU <-> EN).",
-              "intent": "Краткое намерение говорящего (например: Мягкий отказ, Уточнение).",
-              "emotion": "Эмоциональный тон (например: Неуверенность, Спокойствие, Спешка).",
-              "suggestedReplies": [
-                { "id": 1, "text": "Вариант ответа 1.", "type": "answer", "description": "Пояснение." },
-                { "id": 2, "text": "Вариант ответа 2.", "type": "question", "description": "Пояснение." },
-                { "id": 3, "text": "Вариант ответа 3.", "type": "topic_change", "description": "Пояснение." }
-              ]
-            }`
-          },
-          {
-            role: 'user',
-            content: `Исходная реплика (${languageCode}): "${text}"`
-          }
-        ]
-      })
-    });
+      {
+        role: 'user' as const,
+        content: `Исходная реплика (${languageCode}): "${text}"`
+      }
+    ];
 
-    if (!openaiResponse.ok) {
-      throw new Error('OpenAI responded with error');
+    try {
+      const openrouterData = await requestOpenRouter(messages, true);
+      const parsedPayload = JSON.parse(openrouterData.choices[0].message.content);
+
+      // 4. Record the message and AI metadata into the Supabase database
+      const { error: messageInsertError } = await supabaseAdmin
+        .from('bridge_messages')
+        .insert({
+          session_id: sessionId,
+          original_text: text,
+          language_code: languageCode,
+          literal_translation: parsedPayload.literalTranslation,
+          intent: parsedPayload.intent,
+          emotion: parsedPayload.emotion,
+          suggested_replies: parsedPayload.suggestedReplies
+        });
+
+      if (messageInsertError) {
+        console.error('[Database Error] Failed to record bridge message:', messageInsertError);
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: parsedPayload
+      }, { status: 200 });
+    } catch (openrouterErr: any) {
+      console.error('[OpenRouter API Error] Failed to generate semantic analysis:', openrouterErr);
+      return NextResponse.json({ error: 'Ошибка генерации контента нейросетью.' }, { status: 502 });
     }
-
-    const openaiData = await openaiResponse.json();
-    const parsedPayload = JSON.parse(openaiData.choices[0].message.content);
-
-    // 4. Record the message and AI metadata into the Supabase database
-    const { error: messageInsertError } = await supabaseAdmin
-      .from('bridge_messages')
-      .insert({
-        session_id: sessionId,
-        original_text: text,
-        language_code: languageCode,
-        literal_translation: parsedPayload.literalTranslation,
-        intent: parsedPayload.intent,
-        emotion: parsedPayload.emotion,
-        suggested_replies: parsedPayload.suggestedReplies
-      });
-
-    if (messageInsertError) {
-      console.error('[Database Error] Failed to record bridge message:', messageInsertError);
-    }
-
-    return NextResponse.json({
-      success: true,
-      data: parsedPayload
-    }, { status: 200 });
 
   } catch (err: any) {
     console.error('Inside Bridge Route error:', err);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ error: 'Внутренняя ошибка сервера' }, { status: 500 });
   }
 }
