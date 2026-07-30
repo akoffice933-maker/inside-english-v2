@@ -6,6 +6,8 @@
  * without modifying routing code, simply by updating the NEXT_PUBLIC_OPENROUTER_MODEL env variable.
  */
 
+import { fetchWithTimeout } from '@/lib/fetch-utils';
+
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 const DEFAULT_MODEL = process.env.NEXT_PUBLIC_OPENROUTER_MODEL || 'openai/gpt-4o';
 
@@ -34,7 +36,7 @@ export async function requestOpenRouter(
 
   console.log(`[OpenRouter API] Routing completion to model: "${model}" (JSON Mode: ${jsonMode})`);
 
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+  const response = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -50,7 +52,7 @@ export async function requestOpenRouter(
         response_format: { type: 'json_object' }
       })
     }),
-  });
+  }, 12000); // 12-second timeout guard prevents hanging serverless execution costs (Vulnerability Fix #2)
 
   if (!response.ok) {
     const errText = await response.text();

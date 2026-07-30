@@ -45,7 +45,7 @@ export async function initializePushNotifications() {
       const deviceToken = token.value;
       const platform = Capacitor.getPlatform(); // 'ios' or 'android'
 
-      console.log(`[Push Notifications] Device registered. Token: ${deviceToken}`);
+      console.log(`[Push Notifications] Device registered. Token: ${deviceToken.slice(0, 10)}...`);
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {

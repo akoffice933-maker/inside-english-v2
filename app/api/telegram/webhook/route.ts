@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServiceClient } from '@/lib/supabase';
+import { fetchWithRetry } from '@/lib/fetch-utils';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const TELEGRAM_WEBHOOK_SECRET_TOKEN = process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN || '';
@@ -54,7 +55,8 @@ export async function POST(request: NextRequest) {
       console.log(`[Telegram Webhook] Received pre_checkout_query. Approving transaction ID: ${preCheckoutQueryId}`);
 
       // answerPreCheckoutQuery: Approves the payment and allows Telegram to process charge (MANDATORY)
-      const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerPreCheckoutQuery`, {
+      // Uses a retry policy with exponential backoff (max 3 times, 5s timeout) to satisfy the strict 10s SLA (Vulnerability Fix #2 & #5)
+      const response = await fetchWithRetry(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerPreCheckoutQuery`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -63,7 +65,7 @@ export async function POST(request: NextRequest) {
           pre_checkout_query_id: preCheckoutQueryId,
           ok: true
         })
-      });
+      }, 3, 100, 5000);
 
       if (!response.ok) {
         const errDetails = await response.text();
@@ -82,18 +84,18 @@ export async function POST(request: NextRequest) {
     if (message && message.successful_payment) {
       const payment = message.successful_payment;
       const invoicePayload = payment.invoice_payload; // e.g. "sub_monthly_user_uuid"
-      console.log(`[Telegram Webhook] Payment successful! Payload received: "${invoicePayload}"`);
+      console.log(`[Telegram Webhook] Payment successful! Payload received: "${invoicePayload.substring(0, 15)}..."`);
 
       // Extract the Supabase user UUID from the payload
       const payloadMatch = invoicePayload.match(/user_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
       
       if (!payloadMatch) {
-        console.error(`[Telegram Webhook] Failed to extract user UUID from invoice payload: "${invoicePayload}"`);
+        console.error(`[Telegram Webhook] Failed to extract user UUID from invoice payload`);
         return NextResponse.json({ error: 'Invalid invoice payload structure.' }, { status: 400 });
       }
 
       const userId = payloadMatch[1];
-      console.log(`[Telegram Webhook] Activating Inside Premium for User UUID: ${userId}`);
+      console.log(`[Telegram Webhook] Activating Inside Premium for User UUID: ${userId.substring(0, 8)}...`);
 
       // Update the settings JSONB column to activate premium access
       const supabaseAdmin = createSupabaseServiceClient();
@@ -127,7 +129,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Database update failed.' }, { status: 500 });
       }
 
-      console.log(`[Telegram Webhook] Inside Premium successfully activated for user UUID: ${userId}`);
+      console.log(`[Telegram Webhook] Inside Premium successfully activated for user UUID: ${userId.substring(0, 8)}...`);
       return NextResponse.json({ success: true, status: 'premium_activated' }, { status: 200 });
     }
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServiceClient, createSupabaseRouteClient, telegramMockEmail } from '@/lib/supabase';
+import { fetchWithRetry } from '@/lib/fetch-utils';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 
@@ -64,7 +65,8 @@ export async function POST(request: NextRequest) {
     const priceAmount = plan === 'annual' ? 750 : 150; // Pricing matched to 150 / 750 Stars
 
     // 2. Call Telegram Bot API: createInvoiceLink
-    console.log(`[Telegram Stars API] Generating invoice for Telegram ID ${targetTelegramId}. Plan: ${plan}`);
+    // Mask sensitive identifiers (PII Fix #1)
+    console.log(`[Telegram Stars API] Generating invoice for Telegram ID ***${String(targetTelegramId).slice(-4)}. Plan: ${plan}`);
     
     const tgInvoicePayload = {
       title: plan === 'annual' ? 'Inside English Premium (1 Год)' : 'Inside English Premium (1 Месяц)',
@@ -77,13 +79,14 @@ export async function POST(request: NextRequest) {
       ]
     };
 
-    const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/createInvoiceLink`, {
+    // Uses robust fetchWithRetry with exponential backoff and 6s timeout guard (Vulnerability Fix #2 & #5)
+    const response = await fetchWithRetry(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/createInvoiceLink`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(tgInvoicePayload),
-    });
+    }, 3, 100, 6000);
 
     if (!response.ok) {
       const errDetails = await response.text();

@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
 
     // If user does not exist, register them (Auto Sign Up)
     if (signInError && signInError.message.includes('Invalid login credentials')) {
-      console.log(`[Telegram Auth] Registering new user: ${mockEmail}`);
+      console.log(`[Telegram Auth] Registering new user: tg_***${String(telegramId).slice(-4)}@...`);
       
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: mockEmail,
