@@ -55,7 +55,8 @@ export async function POST(request: NextRequest) {
       console.log(`[Telegram Webhook] Received pre_checkout_query. Approving transaction ID: ${preCheckoutQueryId}`);
 
       // answerPreCheckoutQuery: Approves the payment and allows Telegram to process charge (MANDATORY)
-      // Uses a retry policy with exponential backoff (max 3 times, 5s timeout) to satisfy the strict 10s SLA (Vulnerability Fix #2 & #5)
+      // Uses a retry policy with exponential backoff (max 3 times, 2.5s timeout) to satisfy the strict 10s SLA (Vulnerability Fix #2 & #5)
+      // Math Budget: 3 attempts * 2500ms timeout + ~700ms backoff delays = 8.2s maximum runtime in worst case (perfectly within SLA!)
       const response = await fetchWithRetry(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerPreCheckoutQuery`, {
         method: 'POST',
         headers: {
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest) {
           pre_checkout_query_id: preCheckoutQueryId,
           ok: true
         })
-      }, 3, 100, 5000);
+      }, 3, 100, 2500);
 
       if (!response.ok) {
         const errDetails = await response.text();
