@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { TelegramSDK } from '@/lib/telegram';
-import { createClient } from '@supabase/supabase-js';
 
 export interface OfferingPackage {
   identifier: string;
@@ -22,6 +21,10 @@ export interface OfferingPackage {
  * 
  * Fixes Vulnerability #1: Replaces top-level static require() with dynamic, lazy-loaded import()
  * to prevent massive bundle bloat for the 95%+ of users launching on Telegram Mini Apps.
+ * 
+ * OPTIMIZATION FIXED (Vulnerability #1b / Bundle Bloat):
+ * Lazily loads the heavy '@supabase/supabase-js' SDK on-demand at runtime inside client handlers,
+ * completely stripping its weight from the initial /premium bundle First Load JS size!
  */
 export function usePurchaseFlow(onPurchaseSuccess?: () => void) {
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'annual'>('annual');
@@ -31,13 +34,15 @@ export function usePurchaseFlow(onPurchaseSuccess?: () => void) {
   const [isTelegramMiniApp, setIsTelegramMiniApp] = useState(false);
   const [isNativeMobile, setIsNativeMobile] = useState(false);
 
-  // Safe lazy loader for Client-side Supabase connection
-  const getSupabaseClient = () => {
+  // Safe dynamic lazy loader for Client-side Supabase connection (Fixes Supabase static bundle bloat!)
+  const getSupabaseClient = async () => {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
     if (!supabaseUrl || !supabaseAnonKey) {
       return null;
     }
+    // Lazy load the heavy Supabase SDK dynamically on-demand
+    const { createClient } = await import('@supabase/supabase-js');
     return createClient(supabaseUrl, supabaseAnonKey);
   };
 
@@ -96,7 +101,7 @@ export function usePurchaseFlow(onPurchaseSuccess?: () => void) {
         if (tgUser) {
           appUserID = String(tgUser.id);
         } else {
-          const supabaseClient = getSupabaseClient();
+          const supabaseClient = await getSupabaseClient();
           if (supabaseClient) {
             const { data: { user } } = await supabaseClient.auth.getUser();
             if (user) {
