@@ -4,16 +4,6 @@ import { useState, useEffect } from 'react';
 import { TelegramSDK } from '@/lib/telegram';
 import { createClient } from '@supabase/supabase-js';
 
-// Safe Dynamic import for RevenueCat Purchases SDK on native platforms
-let Purchases: any = null;
-if (typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform()) {
-  try {
-    Purchases = require('@revenuecat/purchases-capacitor').Purchases;
-  } catch (e) {
-    console.warn('RevenueCat SDK failed to load on non-native runtime', e);
-  }
-}
-
 export interface OfferingPackage {
   identifier: string;
   packageType: 'MONTHLY' | 'ANNUAL';
@@ -29,6 +19,9 @@ export interface OfferingPackage {
  * Custom React Hook for Inside English Premium purchase flows (Resolves Yellow Flag #4).
  * Extracts all state, TMA platform checks, RevenueCat integrations, Telegram Stars checkout,
  * and restore processes away from the UI components.
+ * 
+ * Fixes Vulnerability #1: Replaces top-level static require() with dynamic, lazy-loaded import()
+ * to prevent massive bundle bloat for the 95%+ of users launching on Telegram Mini Apps.
  */
 export function usePurchaseFlow(onPurchaseSuccess?: () => void) {
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'annual'>('annual');
@@ -36,6 +29,7 @@ export function usePurchaseFlow(onPurchaseSuccess?: () => void) {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isTelegramMiniApp, setIsTelegramMiniApp] = useState(false);
+  const [isNativeMobile, setIsNativeMobile] = useState(false);
 
   // Safe lazy loader for Client-side Supabase connection
   const getSupabaseClient = () => {
@@ -51,6 +45,9 @@ export function usePurchaseFlow(onPurchaseSuccess?: () => void) {
   useEffect(() => {
     const isTMA = TelegramSDK.isTMA();
     setIsTelegramMiniApp(isTMA);
+
+    const isNative = typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform();
+    setIsNativeMobile(isNative);
 
     async function configureAndLoadBilling() {
       // Setup Fallback Mock Offerings first
@@ -77,7 +74,7 @@ export function usePurchaseFlow(onPurchaseSuccess?: () => void) {
         }
       ];
 
-      if (!Purchases) {
+      if (!isNative) {
         setOfferings(mockOfferings);
         return;
       }
@@ -108,6 +105,9 @@ export function usePurchaseFlow(onPurchaseSuccess?: () => void) {
           }
         }
 
+        // Lazy-load Purchases SDK at runtime on native mobile (Fixes Vulnerability #1 - Bundle Bloat!)
+        const { Purchases } = await import('@revenuecat/purchases-capacitor');
+        
         // Configure RevenueCat singleton before calling getOfferings
         await Purchases.configure({ apiKey, appUserID });
         console.log('[RevenueCat] Successfully configured for user:', appUserID);
@@ -203,7 +203,7 @@ export function usePurchaseFlow(onPurchaseSuccess?: () => void) {
     }
 
     // Web Fallback Simulation
-    if (!Purchases) {
+    if (!isNativeMobile) {
       setTimeout(() => {
         setIsLoading(false);
         alert(`[Имитация покупки] Вы успешно подписались на план "${selectedPlan}"! Статус Premium активен 🎉.`);
@@ -214,6 +214,8 @@ export function usePurchaseFlow(onPurchaseSuccess?: () => void) {
 
     // Native StoreKit Purchase Execution
     try {
+      // Lazy-load Purchases SDK at runtime (Fixes Vulnerability #1)
+      const { Purchases } = await import('@revenuecat/purchases-capacitor');
       const { customerInfo } = await Purchases.purchasePackage(activePackage);
       if (customerInfo.entitlements.active['premium'] !== undefined) {
         console.log('Purchase successful! Premium entitlement activated.');
@@ -234,7 +236,7 @@ export function usePurchaseFlow(onPurchaseSuccess?: () => void) {
     setIsLoading(true);
     setErrorMessage(null);
 
-    if (!Purchases) {
+    if (!isNativeMobile) {
       setTimeout(() => {
         setIsLoading(false);
         alert('Покупки успешно восстановлены!');
@@ -243,6 +245,8 @@ export function usePurchaseFlow(onPurchaseSuccess?: () => void) {
     }
 
     try {
+      // Lazy-load Purchases SDK at runtime (Fixes Vulnerability #1)
+      const { Purchases } = await import('@revenuecat/purchases-capacitor');
       const customerInfo = await Purchases.restorePurchases();
       if (customerInfo.entitlements.active['premium'] !== undefined) {
         alert('Премиум подписка успешно восстановлена!');

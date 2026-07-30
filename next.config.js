@@ -20,7 +20,7 @@ const nextConfig = {
     assetPrefix: basePath,
   } : {
     // Normal Server SSR Mode Configurations:
-    // Security headers are fully supported here (they throw warnings in raw static export)
+    // Security headers are fully supported here
     async headers() {
       return [
         {
@@ -30,9 +30,11 @@ const nextConfig = {
               key: 'X-Content-Type-Options',
               value: 'nosniff',
             },
+            // Fixes Blocker #1: Replaces X-Frame-Options: DENY (which broke Telegram Mini App iframe embeds on Web/Desktop!)
+            // with Content-Security-Policy frame-ancestors to securely permit trusted Telegram origins while guarding clickjacking.
             {
-              key: 'X-Frame-Options',
-              value: 'DENY',
+              key: 'Content-Security-Policy',
+              value: "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org",
             },
             {
               key: 'X-XSS-Protection',
@@ -42,6 +44,16 @@ const nextConfig = {
               key: 'Referrer-Policy',
               value: 'strict-origin-when-cross-origin',
             }
+          ],
+        },
+        // Fixes Vulnerability #3b: Explicit Aggressive Cache-Control for immutable static audio assets
+        {
+          source: '/audio/:path*',
+          headers: [
+            {
+              key: 'Cache-Control',
+              value: 'public, max-age=31536000, immutable',
+            },
           ],
         },
       ];
