@@ -92,7 +92,7 @@ export function PremiumCard({
 
         <div className="mt-6 flex flex-wrap items-center gap-3">
           <div className="text-2xl font-bold text-white">
-            990 ₽ <span className="text-sm font-medium text-white/50">/ месяц</span>
+            {TelegramSDK.isTMA() ? '150 🌟' : '$9.99'} <span className="text-sm font-medium text-white/50">/ месяц</span>
           </div>
           <motion.button
             whileHover={reduced ? undefined : { scale: 1.04 }}
