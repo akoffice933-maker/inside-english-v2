@@ -25,7 +25,7 @@ export interface OfferingPackage {
  */
 export function usePurchaseFlow(onPurchaseSuccess?: () => void) {
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'annual'>('annual');
-  const [offerings, setOfferings] = useState<OfferingPackage[]>([]);
+  const [offerings, setOfferings] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isTelegramMiniApp, setIsTelegramMiniApp] = useState(false);
@@ -247,7 +247,7 @@ export function usePurchaseFlow(onPurchaseSuccess?: () => void) {
     try {
       // Lazy-load Purchases SDK at runtime (Fixes Vulnerability #1)
       const { Purchases } = await import('@revenuecat/purchases-capacitor');
-      const customerInfo = await Purchases.restorePurchases();
+      const { customerInfo } = await Purchases.restorePurchases();
       if (customerInfo.entitlements.active['premium'] !== undefined) {
         alert('Премиум подписка успешно восстановлена!');
         if (onPurchaseSuccess) onPurchaseSuccess();

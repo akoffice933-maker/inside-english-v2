@@ -25,7 +25,7 @@ export default function AudioProvider({ tokens, children }: Props) {
   return (
     <>
       {children}
-      <PersistentPlayer tokens={tokens} />
+      <PersistentPlayer />
       <PWAInstallPrompt />
     </>
   );
