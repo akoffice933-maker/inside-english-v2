@@ -5,10 +5,10 @@ import { isRateLimited, getClientIP } from '@/lib/rate-limit';
 /**
  * GET /api/user/stats
  * 
- * Production-grade Database-Aware User Progress Statistics Endpoint (Resolves Блокер #2).
+ * Production-grade Database-Aware User Progress Statistics Endpoint (Resolves Блокер #3).
  * Fetches real active metrics for the dashboard:
  * 1. Total words learned (SELECT count from user_words).
- * 2. Average Shadowing Score or listening minutes.
+ * 2. Real Average Shadowing Score (SELECT AVG(score) from shadowing_attempts).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -47,7 +47,8 @@ export async function GET(request: NextRequest) {
     if (!userId) {
       return NextResponse.json({ 
         totalWordsLearned: 0, 
-        averageShadowingScore: 0 
+        averageShadowingScore: 0,
+        streak: 0
       }, { status: 200 });
     }
 
@@ -61,7 +62,21 @@ export async function GET(request: NextRequest) {
       console.error('[User Stats API] Failed to fetch total words:', wordsError);
     }
 
-    // 4. Query user statistics (streak, audio minutes) directly from profile
+    // 4. Fix Blocker #3: Query real average shadowing score from shadowing_attempts (No more fake score formula!)
+    const { data: scoreData, error: scoreError } = await supabaseAdmin
+      .from('shadowing_attempts')
+      .select('score')
+      .eq('user_id', userId);
+
+    let averageScore = 0;
+    if (!scoreError && scoreData && scoreData.length > 0) {
+      const totalScore = scoreData.reduce((sum, item) => sum + item.score, 0);
+      averageScore = Math.round(totalScore / scoreData.length);
+    } else if (scoreError) {
+      console.error('[User Stats API] Failed to fetch average shadowing score:', scoreError);
+    }
+
+    // 5. Query user statistics (streak, audio minutes) directly from profile
     const { data: userProfile, error: profileError } = await supabaseAdmin
       .from('users')
       .select('total_audio_minutes, streak')
@@ -71,10 +86,6 @@ export async function GET(request: NextRequest) {
     if (profileError) {
       console.error('[User Stats API] Failed to fetch user profile metrics:', profileError);
     }
-
-    // Base average score. In production, this can be calculated from completed shadow sessions.
-    // For now, we scale it dynamically based on completed minutes to look realistic, or return 85 as baseline.
-    const averageScore = userProfile?.total_audio_minutes ? Math.min(98, 75 + userProfile.total_audio_minutes) : 0;
 
     return NextResponse.json({
       success: true,

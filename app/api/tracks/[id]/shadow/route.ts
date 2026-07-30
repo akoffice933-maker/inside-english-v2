@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseRouteClient } from '@/lib/supabase';
+import { createSupabaseRouteClient, createSupabaseServiceClient } from '@/lib/supabase';
 import { alignAndEvaluate } from '@/lib/alignment';
 import { isRateLimited } from '@/lib/rate-limit';
 import { fetchWithTimeout } from '@/lib/fetch-utils';
@@ -134,6 +134,21 @@ export async function POST(
 
     // 6. Run Alignment & Match Evaluation Algorithm
     const evaluation = alignAndEvaluate(targetText, transcribedText);
+
+    // Fix Blocker #3: Securely record the real shadowing attempt score in database (no more fake stats!)
+    try {
+      const supabaseAdmin = createSupabaseServiceClient();
+      await supabaseAdmin
+        .from('shadowing_attempts')
+        .insert({
+          user_id: user.id,
+          track_id: trackId,
+          score: evaluation.score
+        });
+      console.log(`[Shadowing API] Securely recorded score ${evaluation.score} for user UUID: ${user.id.substring(0, 8)}...`);
+    } catch (dbErr) {
+      console.error('[Shadowing API Database Error] Failed to persist score:', dbErr);
+    }
 
     // 7. Return Structured Output to Frontend with rate limit headers
     const responseHeaders = new Headers({

@@ -1,4 +1,4 @@
--- Supabase Database Migrations for Inside English v2.0 (AI COACH & INSIDE BRIDGE TABLES)
+-- Supabase Database Migrations for Inside English v2.0 (AI COACH, INSIDE BRIDGE & SHADOWING ATTEMPTS)
 -- Run this in the Supabase SQL Editor to initialize all necessary tables and security policies.
 
 -- ==========================================
@@ -89,3 +89,26 @@ WITH CHECK (EXISTS (
 ));
 
 CREATE INDEX IF NOT EXISTS idx_bridge_messages_session ON public.bridge_messages(session_id);
+
+
+-- ==========================================
+-- 4. SHADOWING ATTEMPTS TABLE (Fixes Blocker #3: Real-world shadowing tracking!)
+-- ==========================================
+CREATE TABLE IF NOT EXISTS public.shadowing_attempts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
+    track_id UUID REFERENCES public.tracks(id) ON DELETE CASCADE NOT NULL,
+    score INT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Enable RLS
+ALTER TABLE public.shadowing_attempts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage their own shadowing attempts"
+ON public.shadowing_attempts FOR ALL 
+TO authenticated
+USING (auth.uid() = user_id)
+WITH CHECK (auth.uid() = user_id);
+
+CREATE INDEX IF NOT EXISTS idx_shadowing_attempts_user ON public.shadowing_attempts(user_id);
