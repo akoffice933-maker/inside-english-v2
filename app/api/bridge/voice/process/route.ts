@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { isRateLimited, getClientIP } from '@/lib/rate-limit';
 import { requestOpenRouter } from '@/lib/openrouter';
+import { resolveUserFromRequest } from '@/lib/auth-helpers';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 
@@ -10,6 +11,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
  * 
  * Production-ready in-memory Voice Processing Pipeline for Inside Bridge (Flow Talk) MVP.
  * Integrates: OpenRouter API aggregator for unified, cost-effective LLM processing.
+ * Fixes: Uses unified resolveUserFromRequest to support both TMA (telegramId) and Cookie Auth.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -23,6 +25,7 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const audioFile = formData.get('audio') as File | null;
     const sessionId = formData.get('sessionId') as string | null;
+    const telegramId = formData.get('telegramId') as string | null;
 
     if (!audioFile || !sessionId) {
       return NextResponse.json({ error: 'Неполные параметры запроса. Ожидается "audio" и "sessionId".' }, { status: 400 });
@@ -41,12 +44,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Сессия диалога не найдена.' }, { status: 404 });
     }
 
-    // Fetch user settings securely via service role to check subscription status
-    const { data: userProfile } = await supabaseAdmin
-      .from('users')
-      .select('settings')
-      .eq('id', session.creator_id)
-      .maybeSingle();
+    // Fetch user settings securely via unified auth helper (Fixes Blocker #2!)
+    const userProfile = await resolveUserFromRequest(request, telegramId || session.creator_id);
 
     const isPremiumUser = userProfile?.settings?.is_premium === true;
     if (!isPremiumUser && process.env.NODE_ENV === 'production') {
@@ -58,7 +57,7 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(await audioFile.arrayBuffer());
     const fileExtension = audioFile.name.split('.').pop() || 'webm';
 
-    // 3. STEP A: Whisper Speech-to-Text Transcription (Must be direct to OpenAI Whisper or equivalent STT)
+    // 3. STEP A: Whisper Speech-to-Text Transcription
     if (!OPENAI_API_KEY) {
       // Mock Fallback for local development or static demo previewing (prevents crashing when API keys are absent)
       if (process.env.NODE_ENV === 'production') {

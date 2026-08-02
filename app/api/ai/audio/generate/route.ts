@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServiceClient, createSupabaseRouteClient } from '@/lib/supabase';
+import { createSupabaseServiceClient } from '@/lib/supabase';
 import { isRateLimited, getClientIP } from '@/lib/rate-limit';
 import { fetchWithTimeout } from '@/lib/fetch-utils';
+import { resolveUserFromRequest } from '@/lib/auth-helpers';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 
@@ -10,7 +11,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
  * 
  * Secure AI Text-To-Speech (TTS) Generation & Supabase Storage Upload Pipeline.
  * 
- * Access: Restricted to Premium Users only in production (Vulnerability Fix #2).
+ * Access: Restricted to Premium Users only in production.
+ * Fixes: Uses unified resolveUserFromRequest to support both TMA (telegramId) and Cookie Auth.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -21,29 +23,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Вы генерируете аудио слишком часто. Пожалуйста, подождите.' }, { status: 429 });
     }
 
-    const { text, voice = 'nova', filename } = await request.json();
+    const { text, voice = 'nova', filename, telegramId } = await request.json();
 
     if (!text) {
-      return NextResponse.json({ error: 'Отсутствует обязательный параметр \"text\".' }, { status: 400 });
+      return NextResponse.json({ error: 'Отсутствует обязательный параметр "text".' }, { status: 400 });
     }
 
-    const supabaseAdmin = createSupabaseServiceClient();
+    // 2. Strict Premium Gate check using unified auth helper (Fixes Blocker #2!)
+    const userProfile = await resolveUserFromRequest(request, telegramId);
 
-    // 2. Strict Premium Gate check
-    const supabase = createSupabaseRouteClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
+    if (!userProfile) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
     }
 
-    const { data: userProfile } = await supabaseAdmin
-      .from('users')
-      .select('settings')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    const isPremiumUser = userProfile?.settings?.is_premium === true;
+    const isPremiumUser = userProfile.settings?.is_premium === true;
     if (!isPremiumUser && process.env.NODE_ENV === 'production') {
       return NextResponse.json({ error: 'Премиум-подписка обязательна для генерации персонального аудио.' }, { status: 402 });
     }
@@ -72,9 +65,9 @@ export async function POST(request: NextRequest) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'tts-1', // Nova & Shimmer are highly optimized for tts-1
+        model: 'tts-1',
         input: text,
-        voice: voice, // nova, shimmer, alloy, onyx, fabled, echo
+        voice: voice,
         response_format: 'mp3',
         speed: 1.0
       })
@@ -89,8 +82,9 @@ export async function POST(request: NextRequest) {
     const audioBuffer = Buffer.from(await ttsResponse.arrayBuffer());
 
     // 4. Upload synthesized MP3 directly to Supabase Private Bucket 'audio-tracks'
-    const targetFilename = filename || `generated_${user.id}_${Date.now()}.mp3`;
-    const storagePath = `generated/${user.id}/${targetFilename}`;
+    const supabaseAdmin = createSupabaseServiceClient();
+    const targetFilename = filename || `generated_${userProfile.id}_${Date.now()}.mp3`;
+    const storagePath = `generated/${userProfile.id}/${targetFilename}`;
 
     console.log(`[AI Audio Gen] Uploading synthesized MP3 to storage path: "${storagePath}"`);
 
@@ -98,7 +92,7 @@ export async function POST(request: NextRequest) {
       .from('audio-tracks')
       .upload(storagePath, audioBuffer, {
         contentType: 'audio/mpeg',
-        cacheControl: '31536000', // Cache aggressively forever
+        cacheControl: '31536000',
         upsert: true
       });
 
@@ -109,7 +103,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      audio_url: uploadData.path, // Will be parsed via createSignedUrl inside client routes
+      audio_url: uploadData.path,
       filename: targetFilename
     }, { status: 200 });
 

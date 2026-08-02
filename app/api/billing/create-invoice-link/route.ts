@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServiceClient, createSupabaseRouteClient, telegramMockEmail } from '@/lib/supabase';
+import { createSupabaseServiceClient } from '@/lib/supabase';
 import { fetchWithRetry } from '@/lib/fetch-utils';
+import { resolveUserFromRequest } from '@/lib/auth-helpers';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 
@@ -8,8 +9,9 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
  * POST /api/billing/create-invoice-link
  * 
  * Generates a real Telegram Stars payment invoice link using Telegram Bot API.
- * Fixes Vulnerability: Supports BOTH authenticated Web session cookies (via Supabase Auth)
- * and direct Telegram Mini App requests (via verified telegramId), matching our other API endpoints.
+ * Access: Authenticated users (Web Session or verified Telegram InitData).
+ * 
+ * Fixes: Uses unified resolveUserFromRequest to support both TMA (telegramId) and Cookie Auth.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -25,38 +27,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Telegram payment billing service unavailable.' }, { status: 503 });
     }
 
-    let userId: string | null = null;
-    let targetTelegramId = telegramId;
+    // 1. Resolve User ID and Settings (Fixes TMA Authentication gap!)
+    const userProfile = await resolveUserFromRequest(request, telegramId);
 
-    // 1. Dual Identity Resolution (Fixes TMA Authentication gap!)
-    if (targetTelegramId) {
-      // TMA Path: Resolve user profile directly from Telegram ID using service role client
-      const supabaseAdmin = createSupabaseServiceClient();
-      const mockEmail = telegramMockEmail(targetTelegramId);
-      
-      const { data: userProfile, error: fetchError } = await supabaseAdmin
-        .from('users')
-        .select('id')
-        .eq('email', mockEmail)
-        .maybeSingle();
-
-      if (fetchError || !userProfile) {
-        return NextResponse.json({ error: 'User account not found. Please launch the app from Telegram first.' }, { status: 404 });
-      }
-      userId = userProfile.id;
-    } else {
-      // Web PWA Path: Fallback to standard cookie session
-      const supabase = createSupabaseRouteClient();
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-      if (authError || !user) {
-        return NextResponse.json({ error: 'Unauthorized. Please sign in.' }, { status: 401 });
-      }
-
-      userId = user.id;
-      // Get telegramId from metadata if any
-      targetTelegramId = user.user_metadata?.telegram_id || null;
+    if (!userProfile) {
+      return NextResponse.json({ error: 'User account not found. Please launch the app from Telegram first.' }, { status: 404 });
     }
+
+    // Get telegramId from profile metadata if not passed directly (for Web PWA users)
+    const targetTelegramId = telegramId || userProfile.settings?.telegram_id;
 
     if (!targetTelegramId) {
       return NextResponse.json({ error: 'Your account is not linked to a Telegram profile.' }, { status: 400 });
@@ -65,13 +44,12 @@ export async function POST(request: NextRequest) {
     const priceAmount = plan === 'annual' ? 750 : 150; // Pricing matched to 150 / 750 Stars
 
     // 2. Call Telegram Bot API: createInvoiceLink
-    // Mask sensitive identifiers (PII Fix #1)
     console.log(`[Telegram Stars API] Generating invoice for Telegram ID ***${String(targetTelegramId).slice(-4)}. Plan: ${plan}`);
     
     const tgInvoicePayload = {
       title: plan === 'annual' ? 'Inside English Premium (1 Год)' : 'Inside English Premium (1 Месяц)',
       description: 'Безлимитный доступ ко всем MindTracks, ГипноТрекам, ИИ-Shadowing и оффлайн-кэшированию.',
-      payload: `sub_${plan}_user_${userId}`, // Payload returned in pre_checkout_query webhook
+      payload: `sub_${plan}_user_${userProfile.id}`, // Payload returned in pre_checkout_query webhook
       provider_token: '', // Must be empty for Telegram Stars
       currency: 'XTR', // Telegram Stars currency code
       prices: [

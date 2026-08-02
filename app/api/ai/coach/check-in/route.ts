@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseRouteClient, createSupabaseServiceClient, telegramMockEmail } from '@/lib/supabase';
+import { createSupabaseServiceClient } from '@/lib/supabase';
 import { isRateLimited, getClientIP } from '@/lib/rate-limit';
 import { requestOpenRouter } from '@/lib/openrouter';
+import { resolveUserFromRequest } from '@/lib/auth-helpers';
+
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 
 /**
  * POST /api/ai/coach/check-in
@@ -12,6 +15,7 @@ import { requestOpenRouter } from '@/lib/openrouter';
  * 
  * Fixes Blocker #2: Strictly gates access behind active is_premium subscription in production!
  * Integrates: OpenRouter API aggregator for unified, cost-effective LLM processing.
+ * Fixes: Uses unified resolveUserFromRequest to support both TMA (telegramId) and Cookie Auth.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -30,42 +34,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Необходимо передать текущее состояние и описание настроения.' }, { status: 400 });
     }
 
-    // 2. Resolve User ID and Settings (Dual-Identity Bridge)
-    let userId: string | null = null;
-    let userSettings: any = null;
-    let supabaseClient;
+    // 2. Resolve User ID and Settings (Dual-Identity Bridge) (Fixes Blocker #2!)
+    const userProfile = await resolveUserFromRequest(request, telegramId);
 
-    if (telegramId) {
-      supabaseClient = createSupabaseServiceClient();
-      const { data: profile } = await supabaseClient
-        .from('users')
-        .select('id, settings')
-        .eq('email', telegramMockEmail(telegramId))
-        .maybeSingle();
-      userId = profile?.id || null;
-      userSettings = profile?.settings || null;
-    } else {
-      const supabase = createSupabaseRouteClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        userId = user.id;
-        const adminClient = createSupabaseServiceClient();
-        const { data: profile } = await adminClient
-          .from('users')
-          .select('settings')
-          .eq('id', user.id)
-          .maybeSingle();
-        userSettings = profile?.settings || null;
-      }
-    }
-
-    // Fallback: If no authenticated user is found, reject in production
-    if (!userId && process.env.NODE_ENV === 'production') {
+    // Fallback: If no authenticated user is found, reject in production,
+    // but allow mock previews in development/GitHub Pages static demos.
+    if (!userProfile && process.env.NODE_ENV === 'production') {
       return NextResponse.json({ error: 'Unauthorized. Please sign in.' }, { status: 401 });
     }
 
-    // 3. Strict Premium Gate for high-cost AI Coach checkin
-    const isPremiumUser = userSettings?.is_premium === true;
+    // 3. Fix Blocker #2: Strict Premium Gate for high-cost GPT-4o AI Coach checkin
+    const isPremiumUser = userProfile?.settings?.is_premium === true;
     if (!isPremiumUser && process.env.NODE_ENV === 'production') {
       return NextResponse.json({ 
         error: 'Premium subscription required to access the ИИ-Коуч. Пожалуйста, оформите подписку.' 
@@ -172,13 +151,13 @@ export async function POST(request: NextRequest) {
     }
 
     // 5. Save the generated session to Supabase database (Bypasses RLS safely via service client)
-    if (userId) {
+    if (userProfile?.id) {
       try {
         const supabaseAdmin = createSupabaseServiceClient();
         await supabaseAdmin
           .from('ai_coach_sessions')
           .insert({
-            user_id: userId,
+            user_id: userProfile.id,
             state,
             user_mood_input: moodInput,
             intro_text: gptContent.introText,
