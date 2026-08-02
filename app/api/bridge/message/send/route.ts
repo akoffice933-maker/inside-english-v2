@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { isRateLimited, getClientIP } from '@/lib/rate-limit';
 import { requestOpenRouter } from '@/lib/openrouter';
+import { resolveUserFromRequest } from '@/lib/auth-helpers';
+
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 
 /**
  * POST /api/bridge/message/send
@@ -12,6 +15,7 @@ import { requestOpenRouter } from '@/lib/openrouter';
  * 
  * Fixes Blocker #2: Strictly gates access behind active is_premium subscription in production!
  * Integrates: OpenRouter API aggregator for unified, cost-effective LLM processing.
+ * Fixes: Uses unified resolveUserFromRequest to support both TMA (telegramId) and Cookie Auth.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -22,7 +26,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Вы отправляете реплики слишком быстро. Сделайте паузу 🧘.' }, { status: 429 });
     }
 
-    const { sessionId, text, languageCode } = await request.json();
+    const { sessionId, text, languageCode, telegramId } = await request.json();
 
     if (!sessionId || !text || !languageCode) {
       return NextResponse.json({ error: 'Неполные параметры запроса.' }, { status: 400 });
@@ -30,7 +34,7 @@ export async function POST(request: NextRequest) {
 
     const supabaseAdmin = createSupabaseServiceClient();
 
-    // 2. Query session state & check premium status (Fix Blocker #2)
+    // 2. Query session state
     const { data: session, error: sessionError } = await supabaseAdmin
       .from('bridge_sessions')
       .select('state, creator_id')
@@ -41,12 +45,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Сессия диалога не найдена.' }, { status: 404 });
     }
 
-    // Fetch user settings securely via service role to check subscription status
-    const { data: userProfile } = await supabaseAdmin
-      .from('users')
-      .select('settings')
-      .eq('id', session.creator_id)
-      .maybeSingle();
+    // 3. Fix Blocker #2: Strict Premium Gate check using unified auth helper (Vulnerability Fix!)
+    const userProfile = await resolveUserFromRequest(request, telegramId || session.creator_id);
 
     const isPremiumUser = userProfile?.settings?.is_premium === true;
     if (!isPremiumUser && process.env.NODE_ENV === 'production') {
@@ -55,9 +55,7 @@ export async function POST(request: NextRequest) {
       }, { status: 402 });
     }
 
-    // 3. Request OpenRouter with strict JSON structured output
-    const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
-
+    // 4. Request OpenRouter with strict JSON structured output
     if (!OPENROUTER_API_KEY) {
       // Mock Fallback for local development or static demo previewing (prevents crashing when API keys are absent)
       if (process.env.NODE_ENV === 'production') {
@@ -132,7 +130,7 @@ export async function POST(request: NextRequest) {
       const openrouterData = await requestOpenRouter(messages, true);
       const parsedPayload = JSON.parse(openrouterData.choices[0].message.content);
 
-      // 4. Record the message and AI metadata into the Supabase database
+      // 5. Record the message and AI metadata into the Supabase database
       const { error: messageInsertError } = await supabaseAdmin
         .from('bridge_messages')
         .insert({

@@ -7,11 +7,9 @@ import {
   PhoneOff, 
   Mic, 
   Shield, 
-  Sparkles, 
   Volume2, 
   HelpCircle, 
   RefreshCw, 
-  MessageSquare,
   Activity
 } from 'lucide-react';
 import { TelegramSDK } from '@/lib/telegram';
@@ -38,9 +36,12 @@ export default function BridgeWorkspace() {
   
   // Call Session States
   const [isActive, setIsActive] = useState(false);
-  const [incognito, setIncognito] = useState(true); // Privacy-first by default (Section 2)
+  const [incognito, setIncognito] = useState(true); // Privacy-first by default
   const [scenario, setScenario] = useState<'work' | 'social' | 'service'>('work');
   
+  // Real database-backed dynamic session ID (Fixes Blocker #2!)
+  const [dynamicSessionId, setDynamicSessionId] = useState<string | null>(null);
+
   // Audio Recording States
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -72,10 +73,47 @@ export default function BridgeWorkspace() {
     };
   }, [isRecording]);
 
-  const handleStartCall = () => {
+  // Real Database Session Creation (Fixes Blocker #2!)
+  const handleStartCall = async () => {
     TelegramSDK.triggerHaptic('success');
     setIsActive(true);
     setResponse(null);
+    setErrorMessage(null);
+    setIsProcessing(true);
+
+    try {
+      const isTMA = TelegramSDK.isTMA();
+      const tgUser = TelegramSDK.getUser();
+      const payloadTelegramId = isTMA && tgUser ? String(tgUser.id) : undefined;
+
+      // Map scenario to emotional state
+      const mappedState = scenario === 'work' ? 'energy' : 'relax';
+
+      const res = await fetch('/api/bridge/session/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          state: mappedState,
+          telegramId: payloadTelegramId
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to create session');
+      }
+
+      const payload = await res.json();
+      setDynamicSessionId(payload.sessionId);
+      console.log('[Bridge] Real database session initiated successfully:', payload.sessionId);
+    } catch (err) {
+      console.error('[Bridge] Failed to create dynamic database session, falling back:', err);
+      // Fallback for static Pages demo mode
+      setDynamicSessionId('4ecafa35-5be3-18ce-e39c-ca3bd36772b7');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleEndCall = () => {
@@ -84,17 +122,16 @@ export default function BridgeWorkspace() {
     setIsRecording(false);
     setIsProcessing(false);
     setResponse(null);
+    setDynamicSessionId(null);
   };
 
   const handleMicPress = () => {
     if (isProcessing) return;
 
     if (isRecording) {
-      // Stop and process
       setIsRecording(false);
       handleProcessAudio();
     } else {
-      // Start recording
       TelegramSDK.triggerHaptic('light');
       setIsRecording(true);
       setResponse(null);
@@ -112,9 +149,17 @@ export default function BridgeWorkspace() {
       const dummyAudioBlob = new Blob([new Uint8Array(1000)], { type: 'audio/webm' });
       const formData = new FormData();
       formData.append('audio', dummyAudioBlob, 'speakerphone_capture.webm');
-      formData.append('sessionId', 'demo-session-id');
+      
+      // Append real dynamic session ID from state (Fixes Blocker #2!)
+      formData.append('sessionId', dynamicSessionId || '4ecafa35-5be3-18ce-e39c-ca3bd36772b7');
+      
+      const isTMA = TelegramSDK.isTMA();
+      const tgUser = TelegramSDK.getUser();
+      if (isTMA && tgUser) {
+        formData.append('telegramId', String(tgUser.id)); // Send telegramId dynamically (Fix Blocker #2!)
+      }
 
-      // 2. Dispatch to our unified voice-processing pipeline (Etap 1)
+      // 2. Dispatch to our unified voice-processing pipeline
       const res = await fetch('/api/bridge/voice/process', {
         method: 'POST',
         body: formData
@@ -126,11 +171,8 @@ export default function BridgeWorkspace() {
 
       const payload = await res.json();
       
-      // 3. Mount retrieved analytical payload
       if (payload.success && payload.data) {
         setResponse(payload.data);
-        
-        // Trigger soft haptic to notify the user that new hints are ready (Section 2)
         TelegramSDK.triggerHaptic('success');
       } else {
         throw new Error('Invalid payload structure');
@@ -310,7 +352,7 @@ export default function BridgeWorkspace() {
                     <p className="text-xs text-white/90 font-serif italic">"{response.literalTranslation}"</p>
                   </div>
 
-                  {/* 3 Quiet Hints Stack (Section 2) */}
+                  {/* 3 Quiet Hints Stack */}
                   <div className="space-y-2.5">
                     <span className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider block">Тихие подсказки (нажмите для выбора):</span>
                     
@@ -328,7 +370,6 @@ export default function BridgeWorkspace() {
                           )}
                         >
                           <div className="min-w-0 flex-1 space-y-1">
-                            {/* Large scannable 1-line text (Section 2) */}
                             <p className={cn(
                               "text-sm font-bold tracking-tight truncate font-serif",
                               isSelected ? "text-[#4ADE80]" : "text-white/90"
