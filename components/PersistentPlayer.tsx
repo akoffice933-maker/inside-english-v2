@@ -116,17 +116,51 @@ function renderToken(token: TrackToken, mode: "russian" | "mixed" | "english") {
   if (mode === "russian") return token.russian;
   if (mode === "english") return token.english;
   
-  // Fixes Stored XSS vulnerability #4: Cleans up any potential scripting injections
-  // before rendering dangerouslySetInnerHTML in lyrics track. Only allows span tags.
-  const cleanHtml = token.mixed
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // Strip script tags
-    .replace(/on\w+="[^"]*"/g, ''); // Strip onload/onerror attributes
+  return parseMixedLyrics(token.mixed);
+}
+
+/**
+ * Securely parses mixed-language lyrics containing <span> tags into native React elements.
+ * Eliminates dangerouslySetInnerHTML entirely, rendering all other tags (e.g. <img onerror...>)
+ * as harmless plain text, preventing any XSS execution vectors.
+ */
+function parseMixedLyrics(text: string): React.ReactNode {
+  const regex = /<span\s+class=["']([^"']+)["']\s*>(.*?)<\/span>/gi;
+  const elements: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match;
+  
+  while ((match = regex.exec(text)) !== null) {
+    const matchIndex = match.index;
     
-  return (
-    <span
-      dangerouslySetInnerHTML={{ __html: cleanHtml }}
-    />
-  );
+    if (matchIndex > lastIndex) {
+      elements.push(text.substring(lastIndex, matchIndex));
+    }
+    
+    const className = match[1];
+    const content = match[2];
+    
+    // Verify class only contains standard Tailwind color/font styles
+    const isClassSafe = /^[a-zA-Z0-9\s#\[\]\-]+$/.test(className);
+    
+    if (isClassSafe) {
+      elements.push(
+        <span key={matchIndex} className={className}>
+          {content}
+        </span>
+      );
+    } else {
+      elements.push(content);
+    }
+    
+    lastIndex = regex.lastIndex;
+  }
+  
+  if (lastIndex < text.length) {
+    elements.push(text.substring(lastIndex));
+  }
+  
+  return <>{elements}</>;
 }
 
 // ==========================================
