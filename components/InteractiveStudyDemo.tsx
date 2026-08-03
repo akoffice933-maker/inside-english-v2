@@ -6,6 +6,7 @@ import { Check, X as XIcon, RotateCw, Sparkles, Brain, Volume2 } from "lucide-re
 import { springs, reducedMotionTransition } from "@/lib/animations";
 import { TelegramSDK } from "@/lib/telegram";
 import { cn } from "@/lib/utils";
+import { SpotlightCard } from "./SpotlightCard";
 
 export type StudyWord = {
   id: number;
@@ -101,7 +102,10 @@ export default function InteractiveStudyDemo({ words, onComplete }: Props) {
   }, [words]);
 
   return (
-    <div className="glass-panel relative overflow-hidden p-6 sm:p-8">
+    <SpotlightCard 
+      glowColor="rgba(123, 97, 255, 0.2)"
+      className="p-6 sm:p-8 border border-[#7B61FF]/30 relative overflow-hidden transition-all duration-500"
+    >
       <div className="absolute -right-12 -top-12 h-48 w-48 rounded-full bg-[#6C3CE1] opacity-30 blur-3xl" />
       <div className="absolute -left-12 -bottom-12 h-48 w-48 rounded-full bg-[#E94057] opacity-25 blur-3xl" />
 
@@ -182,7 +186,7 @@ export default function InteractiveStudyDemo({ words, onComplete }: Props) {
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </SpotlightCard>
   );
 }
 
