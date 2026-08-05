@@ -15,6 +15,7 @@ import { useReducedMotion } from "framer-motion";
 import { DEMO_TRACKS, DEMO_WORDS } from "@/lib/seed-data";
 import { usePlayerStore } from "@/stores/usePlayerStore";
 import type { Track } from "@/lib/types";
+import { SpotlightCard } from "@/components/SpotlightCard";
 
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || '';
 
@@ -250,51 +251,56 @@ export default function DashboardPage() {
       <section className="mb-7">
         <SectionHeader title="✨ ИИ-Коуч Состояния" subtitle="Получите персональный урок под ваше настроение" />
         
-        <form onSubmit={handleCoachCheckIn} className="glass-panel p-5 rounded-3xl space-y-4 border border-[#7B61FF]/30 relative overflow-hidden">
-          <div className="absolute -right-8 -top-8 w-16 h-16 bg-[#7B61FF]/10 rounded-full blur-xl" />
-          
-          <div className="space-y-1">
-            <label className="text-[11px] text-[#A0A0B0] font-light uppercase tracking-wider block">Как вы себя чувствуете прямо сейчас?</label>
-            <textarea
-              value={moodInput}
-              onChange={(e) => setMoodInput(e.target.value)}
-              placeholder={state === 'sleep' ? "Устал на работе, гудит голова от звонков, хочу расслабиться перед сном..." : "Много задач на день, нужен фокус и заряд бодрости на английском!"}
-              className="w-full bg-black/30 border border-white/5 focus:border-[#7B61FF]/50 rounded-2xl p-3.5 text-xs text-white/90 placeholder-white/30 focus:outline-none resize-none h-20 transition"
-              disabled={isCoachLoading}
-              maxLength={200}
-            />
-          </div>
+        <SpotlightCard 
+          glowColor="rgba(123, 97, 255, 0.2)" 
+          className="p-5 rounded-3xl border border-[#7B61FF]/30 relative overflow-hidden"
+        >
+          <form onSubmit={handleCoachCheckIn} className="space-y-4">
+            <div className="absolute -right-8 -top-8 w-16 h-16 bg-[#7B61FF]/10 rounded-full blur-xl" />
+            
+            <div className="space-y-1">
+              <label className="text-[11px] text-[#A0A0B0] font-light uppercase tracking-wider block">Как вы себя чувствуете прямо сейчас?</label>
+              <textarea
+                value={moodInput}
+                onChange={(e) => setMoodInput(e.target.value)}
+                placeholder={state === 'sleep' ? "Устал на работе, гудит голова от звонков, хочу расслабиться перед сном..." : "Много задач на день, нужен фокус и заряд бодрости на английском!"}
+                className="w-full bg-black/30 border border-white/5 focus:border-[#7B61FF]/50 rounded-2xl p-3.5 text-xs text-white/90 placeholder-white/30 focus:outline-none resize-none h-20 transition"
+                disabled={isCoachLoading}
+                maxLength={200}
+              />
+            </div>
 
-          <button
-            type="submit"
-            disabled={!moodInput.trim() || isCoachLoading}
-            className={`w-full bg-gradient-to-r from-[#6C3CE1] to-[#E94057] hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed py-3.5 rounded-2xl text-xs font-bold tracking-wider uppercase transition shadow-lg shadow-[#6C3CE1]/20 text-white flex items-center justify-center space-x-2`}
-          >
-            {isCoachLoading ? (
-              <span className="w-5.5 h-5.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <>
-                <BrainCircuit size={15} />
-                <span>Создать ИИ-Урок состояния</span>
-              </>
-            )}
-          </button>
+            <button
+              type="submit"
+              disabled={!moodInput.trim() || isCoachLoading}
+              className={`w-full bg-gradient-to-r from-[#6C3CE1] to-[#E94057] hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed py-3.5 rounded-2xl text-xs font-bold tracking-wider uppercase transition shadow-lg shadow-[#6C3CE1]/20 text-white flex items-center justify-center space-x-2`}
+            >
+              {isCoachLoading ? (
+                <span className="w-5.5 h-5.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <>
+                  <BrainCircuit size={15} />
+                  <span>Создать ИИ-Урок состояния</span>
+                </>
+              )}
+            </button>
 
-          {/* Smooth Fade-in Intro overlay from the Coach */}
-          <AnimatePresence>
-            {coachIntro && (
-              <motion.div 
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className="bg-[#1E123A]/95 border border-[#7B61FF]/40 rounded-2xl p-4 text-xs space-y-1.5 leading-relaxed"
-              >
-                <span className="text-[9px] font-bold text-[#7B61FF] uppercase tracking-wider block">ИИ-Коуч Inside:</span>
-                <p className="text-white/90 font-serif italic">"{coachIntro}"</p>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </form>
+            {/* Smooth Fade-in Intro overlay from the Coach */}
+            <AnimatePresence>
+              {coachIntro && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="bg-[#1E123A]/95 border border-[#7B61FF]/40 rounded-2xl p-4 text-xs space-y-1.5 leading-relaxed"
+                >
+                  <span className="text-[9px] font-bold text-[#7B61FF] uppercase tracking-wider block">ИИ-Коуч Inside:</span>
+                  <p className="text-white/90 font-serif italic">"{coachIntro}"</p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </form>
+        </SpotlightCard>
       </section>
 
       {/* RECOMMENDATIONS FOR STATE */}

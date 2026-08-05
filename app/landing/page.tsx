@@ -132,7 +132,7 @@ export default function LandingPage() {
           >
             Английский, который
             <br />
-            <span className="text-gradient-primary text-glow-purple">чувствуется</span>, а не зубрится
+            <span className="text-gradient-primary text-glow-purple inline-block motion-preset-pulse motion-duration-2000">чувствуется</span>, а не зубрится
           </motion.h1>
 
           <motion.p
@@ -187,7 +187,7 @@ export default function LandingPage() {
                 whileInView={reduced ? { opacity: 1 } : { opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: "-50px" }}
                 transition={reduced ? reducedMotionTransition : { ...springs.gentle, delay: i * 0.06 }}
-                className="glass-panel relative overflow-hidden p-5"
+                className="glass-premium-mid hover:glass-premium-high relative overflow-hidden p-5 rounded-3xl transition-all duration-500"
               >
                 <div className={cn("mb-4 grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br shadow-glow-purple", f.gradient)}>
                   <f.Icon size={20} className="text-white" />
@@ -212,7 +212,7 @@ export default function LandingPage() {
                 whileInView={reduced ? { opacity: 1 } : { opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: "-50px" }}
                 transition={reduced ? reducedMotionTransition : { ...springs.gentle, delay: i * 0.05 }}
-                className="glass-panel p-5"
+                className="glass-premium-mid hover:glass-premium-high p-5 rounded-3xl transition-all duration-500"
               >
                 <div className="text-gradient-primary text-3xl font-extrabold">{s.num}</div>
                 <h4 className="mt-2 text-base font-bold text-white">{s.title}</h4>
@@ -322,7 +322,7 @@ export default function LandingPage() {
                 whileInView={reduced ? { opacity: 1 } : { opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: "-50px" }}
                 transition={reduced ? reducedMotionTransition : { ...springs.gentle, delay: i * 0.05 }}
-                className="glass-panel p-5"
+                className="glass-premium-mid hover:glass-premium-high p-5 rounded-3xl transition-all duration-500"
               >
                 <div className="mb-2 flex items-center gap-0.5 text-amber-400">
                   {Array.from({ length: t.stars }).map((_, idx) => (
@@ -340,7 +340,7 @@ export default function LandingPage() {
       {/* CTA */}
       <section className="relative px-4 py-20 sm:px-6">
         <div className="mx-auto max-w-4xl">
-          <div className="glass-panel relative overflow-hidden p-10 text-center sm:p-14">
+          <div className="glass-premium-mid hover:glass-premium-high relative overflow-hidden p-10 text-center sm:p-14 rounded-[32px] border border-white/10 shadow-glow-purple transition-all duration-500">
             <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-[#6C3CE1] opacity-30 blur-3xl" />
             <div className="absolute -left-20 -bottom-20 h-64 w-64 rounded-full bg-[#E94057] opacity-30 blur-3xl" />
             <div className="relative">
