@@ -60,6 +60,9 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: "https://mock.supabase.co"
           NEXT_PUBLIC_SUPABASE_ANON_KEY: "mock-key"
 
+      - name: Disable Jekyll
+        run: touch ./out/.nojekyll
+
       - name: Upload Artifacts
         uses: actions/upload-pages-artifact@v3
         with:

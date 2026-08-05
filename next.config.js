@@ -13,6 +13,7 @@ const nextConfig = {
   // Conditionally apply Static HTML Export configurations
   ...(isExport ? {
     output: 'export',
+    trailingSlash: true,
     images: { 
       unoptimized: true 
     },
