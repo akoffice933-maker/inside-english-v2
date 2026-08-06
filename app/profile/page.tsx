@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
 import SectionHeader from "@/components/SectionHeader";
 import { TelegramSDK } from "@/lib/telegram";
-import { Crown, Bell, Globe, Settings, LogOut, Check } from "lucide-react";
+import { Crown, Bell, Globe, Settings, LogOut, Check, Download, Trash2, ShieldCheck } from "lucide-react";
 import { motion } from "framer-motion";
 import { springs, reducedMotionTransition } from "@/lib/animations";
 import { useReducedMotion } from "framer-motion";
@@ -20,6 +20,63 @@ export default function ProfilePage() {
   const [isPro, setIsPro] = useState(false);
   const [pushOn, setPushOn] = useState(false);
   const [hapticOn, setHapticOn] = useState(true);
+  
+  const [isExporting, setIsExporting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleExportData = async () => {
+    setIsExporting(true);
+    TelegramSDK.triggerHaptic("medium");
+    try {
+      const id = user.telegramId;
+      const r = await fetch(`/api/user/me${id ? `?telegramId=${id}` : ""}`);
+      if (!r.ok) throw new Error("Export failed");
+      const data = await r.json();
+      
+      const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(data, null, 2))}`;
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", jsonString);
+      downloadAnchor.setAttribute("download", `inside_english_user_data_${id || 'web'}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      
+      TelegramSDK.triggerHaptic("success");
+    } catch (err) {
+      console.error(err);
+      alert("Не удалось экспортировать данные. Попробуйте позже.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    const isConfirmed = window.confirm("🚨 ВНИМАНИЕ! Вы уверены, что хотите навсегда удалить свой аккаунт и все связанные с ним данные в соответствии с законом ФЗ-152 РФ / GDPR? Это действие полностью сотрет ваш прогресс и словарь, и его невозможно будет отменить.");
+    if (!isConfirmed) return;
+
+    setIsDeleting(true);
+    TelegramSDK.triggerHaptic("warning");
+    try {
+      const res = await fetch('/api/user/me', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telegramId: user.telegramId })
+      });
+      
+      if (!res.ok) throw new Error("Deletion failed");
+      const result = await res.json();
+      TelegramSDK.triggerHaptic("success");
+      alert(result.message);
+      
+      // Clear local state and go to home
+      window.location.href = '/';
+    } catch (err) {
+      console.error(err);
+      alert("Не удалось удалить аккаунт. Пожалуйста, обратитесь в службу поддержки.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   useEffect(() => {
     const tg = TelegramSDK.getUser();
@@ -117,6 +174,40 @@ export default function ProfilePage() {
           />
         </>
       )}
+
+      {/* NEW GDPR / PRIVACY AND DATA SECTION */}
+      <SectionHeader title="Конфиденциальность и данные" />
+      <div className="glass-panel mb-6 overflow-hidden divide-y divide-white/5">
+        <button 
+          onClick={handleExportData}
+          disabled={isExporting}
+          className="w-full flex items-center gap-3 p-4 text-left hover:bg-white/[0.02] transition"
+        >
+          <div className="grid h-9 w-9 place-items-center rounded-xl bg-white/5 text-white/80">
+            <Download size={16} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold text-white">Экспорт персональных данных</div>
+            <div className="truncate text-xs text-white/50">Запросить архив в формате JSON (ФЗ-152 / GDPR)</div>
+          </div>
+          <span className="text-xs text-white/40">›</span>
+        </button>
+
+        <button 
+          onClick={handleDeleteAccount}
+          disabled={isDeleting}
+          className="w-full flex items-center gap-3 p-4 text-left hover:bg-red-500/5 transition text-red-400"
+        >
+          <div className="grid h-9 w-9 place-items-center rounded-xl bg-red-500/10 text-red-400">
+            <Trash2 size={16} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold">Удаление аккаунта навсегда</div>
+            <div className="truncate text-xs text-red-400/50">Безвозвратно стереть профиль, прогресс и слова</div>
+          </div>
+          <span className="text-xs text-red-400/40">›</span>
+        </button>
+      </div>
 
       <div className="mt-8 grid place-items-center pb-6">
         <button className="flex items-center gap-2 text-xs text-white/50">
