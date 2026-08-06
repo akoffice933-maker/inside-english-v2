@@ -8,6 +8,8 @@ import { cn, formatTime } from "@/lib/utils";
 import { usePlayerStore } from "@/stores/usePlayerStore";
 import type { Track } from "@/lib/types";
 
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || '';
+
 type Props = {
   track: Track;
   isPro?: boolean;
@@ -28,7 +30,7 @@ export default function TrackCard({ track, isPro = false }: Props) {
     e.stopPropagation();
     if (locked) {
       TelegramSDK.triggerHaptic("soft");
-      window.location.href = "/premium";
+      window.location.href = `${BASE_PATH}/premium`;
       return;
     }
     TelegramSDK.triggerHaptic("medium");

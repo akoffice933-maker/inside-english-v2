@@ -227,7 +227,7 @@ export default function DashboardPage() {
           </div>
           <PremiumBadge isPro={isPro} onUpgrade={() => {
             TelegramSDK.triggerHaptic("medium");
-            window.location.href = "/premium";
+            window.location.href = `${BASE_PATH}/premium`;
           }} />
         </div>
 
@@ -334,7 +334,7 @@ export default function DashboardPage() {
         <section className="mb-7">
           <PremiumCard onUpgrade={() => {
             TelegramSDK.triggerHaptic("medium");
-            window.location.href = "/premium";
+            window.location.href = `${BASE_PATH}/premium`;
           }} isPro={isPro} />
         </section>
       )}
